@@ -1,5 +1,7 @@
 # Task: Khởi tạo project Vite + React + TS + Tailwind + PWA và làm Phase 1 backend (docs/SPEC.md)
 
+APPROVED_BY_USER
+
 Verify mode: light
 <!-- none: refactor/đổi chữ/không ảnh hưởng UI · light: mặc định · full: luồng người dùng mới, nhiều người dùng, logic đồng bộ -->
 
