@@ -6,29 +6,51 @@ Guidelines for coding agents working in this repo.
 
 ## Project Overview
 
-TODO: what the app is, who uses it, main stack.
+`agent-quota-dashboard` is meant to be a dashboard for agent quotas, but the app does not exist yet: the repo only holds the agent-room tooling (created with claude-opencode-agentic-kit) and a one-line README.
+- App stack: TODO (no `package.json`, no source code, no Playwright config yet).
+- Tooling stack: bash scripts + one Python 3 helper (`scripts/room-ops.py`); Claude plans/verifies, OpenCode implements.
 
 ## Architecture
 
-TODO: how the parts talk to each other (HTTP, WebSocket...), ports, where state lives.
+- App architecture: TODO (no app code yet).
+- App dev URL: the config default is `http://localhost:5173` (`DEFAULT_VERIFY_URL` in `.agents/config.sh`); this is only a default, nothing in the repo starts a server on it. In a room, `APP_PORT` / `PLAYWRIGHT_BASE_URL` come from `.agents/room.env`.
+- Agent tooling: Claude hands tasks to OpenCode through files. `scripts/handoff.sh` writes a job to `.agents/queue/`, `scripts/watch-tasks.sh` picks it up and runs `scripts/run-task.sh`, and status goes to `.agents/status/<task>.status` (`queued` -> `running` -> `done` | `stuck`), which `scripts/wait-task.sh` polls.
+- State lives in files: task plans in `.agents/tasks/`, the multi-room board in `.agents/board.md`, logs in `.agents/run.log`. The runtime paths are gitignored (see `.gitignore`).
 
 ## Codebase Map
 
-TODO: main folders and files, one line each, plus the main flow.
+- `.agents/tasks/` - task plans (`_TEMPLATE.md` is the template).
+- `.agents/config.sh` - OpenCode models per difficulty label, verify URL, check hint, batch/run limits.
+- `.agents/MANAGER.md` - instructions for the Manager role.
+- `scripts/agent-room.sh` - init/start/stop/status of a room (pm2 or tmux).
+- `scripts/manager-loop.sh` - Manager daemon (AUTO_MODE), drives plan/verify/ship phases.
+- `scripts/room-ops.py` - deterministic room operations (inbox, plan checks, approve, finalize).
+- `scripts/room-env.sh` - loads `.agents/room.env` (ports, branches, AUTO_MODE).
+- `scripts/handoff.sh`, `scripts/watch-tasks.sh`, `scripts/run-task.sh`, `scripts/wait-task.sh` - hand a task to OpenCode, run it step by step, wait for it.
+- `scripts/notify.sh`, `scripts/board-view.sh`, `scripts/log-gaps.sh` - desktop notification, board viewer, run-log timing analysis.
+- Main flow: plan on `task/<slug>` -> `handoff.sh` -> `watch-tasks.sh` runs `run-task.sh` -> Verify/review -> squash-merge and ship (see CLAUDE.md).
+- App source folders: TODO (none yet).
 
 ## Commands
 
 ```bash
-# TODO: fill in the real commands
-npm install
-npm run dev          # dev server
-npm run typecheck    # or lint / build check
-npx playwright test  # e2e tests
+# App commands: TODO. There is no package.json yet, so install/dev/build/typecheck/e2e
+# commands do not exist. The config only assumes `npm run typecheck` and Playwright specs.
+
+# Agent tooling (run from the repo root)
+scripts/agent-room.sh init --topic <ID> --port <PORT> [--name <name>]
+scripts/agent-room.sh start | stop | status
+scripts/handoff.sh .agents/tasks/<file>.md      # hand a committed task to OpenCode
+scripts/wait-task.sh .agents/tasks/<file>.md    # exit 0 done, 2 stuck, 3 running, 1 error
 ```
 
 ## Code Conventions
 
-TODO: language/style rules taken from the existing code.
+- No app code yet, so no app conventions: TODO.
+- Shell scripts: `#!/usr/bin/env bash`, a usage comment header, `set -euo pipefail` (`set -uo pipefail` in the watcher/wait scripts).
+- Python: `scripts/room-ops.py` is a standalone Python 3 script with a docstring listing its subcommands.
+- Task files and agent-facing prompts use Vietnamese; code identifiers and comments are English.
+- Commits use Conventional Commits (`feat(...)`, `chore:`, `plan: <slug>`).
 
 ## Testing Rules
 
@@ -43,7 +65,7 @@ TODO: language/style rules taken from the existing code.
 - A step that adds or changes UI ends by writing one `Selectors:` line to "Trạng thái hiện tại" (ids, classes, data-* and the file holding them). A later test step reads that line before grepping the code.
 - Use unique test data per run (e.g. usernames like `user-${Date.now()}`) so runs do not collide.
 - Tests must never touch production data.
-- Test hook: TODO (e.g. `window.__APP__` enabled with `?test=1` to read/set state). Until it exists, do not script long UI flows just to reach a screen.
+- Test hook: none yet (no app code). Until it exists, do not script long UI flows just to reach a screen.
 
 ## Verify Phase
 
