@@ -27,3 +27,4 @@ playwright-report/
 .agents/logs/
 .agents/manager.lock
 .agents/manager.sig
+.agents/timeline/
