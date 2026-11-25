@@ -44,7 +44,7 @@ Verify mode: light
 - Chỗ dễ nhầm: `opencode_go` dùng `cycle_tokens_used` cộng dồn nên test phải tính từ giá trị đọc được trước đó, không giả định 0.
 
 ## Plan
-- [ ] 1. [vừa] `package.json` → khởi tạo frontend: tạo `package.json` (scripts như Ngữ cảnh), `vite.config.ts` (react, tailwind, VitePWA injectManifest, `server.proxy['/api'] = 'http://localhost:4818'`), `tsconfig.app.json`, `tsconfig.worker.json`, `index.html`, `src/main.tsx`, `src/App.tsx` (placeholder `<h1 data-testid="app-title">Agent Quota Dashboard</h1>`), `src/index.css` (`@import "tailwindcss"`), `src/sw.ts` (push + notificationclick), `public/icon.svg`; cập nhật `.gitignore`. Chạy `npm install`, `npm run build`.
+- [x] 1. [vừa] `package.json` → khởi tạo frontend: tạo `package.json` (scripts như Ngữ cảnh), `vite.config.ts` (react, tailwind, VitePWA injectManifest, `server.proxy['/api'] = 'http://localhost:4818'`), `tsconfig.app.json`, `tsconfig.worker.json`, `index.html`, `src/main.tsx`, `src/App.tsx` (placeholder `<h1 data-testid="app-title">Agent Quota Dashboard</h1>`), `src/index.css` (`@import "tailwindcss"`), `src/sw.ts` (push + notificationclick), `public/icon.svg`; cập nhật `.gitignore`. Chạy `npm install`, `npm run build`.
 - [ ] 2. [vừa] `migrations/0001_init.sql` → tạo 4 bảng + seed `orchestrator_control`; `wrangler.toml`; `worker/types.ts` (`Env`, `Provider`, `QuotaSnapshot`, `IngestPayload`); `worker/db.ts` (hàm `upsertClaudeSnapshot`, `incrementOpencodeSnapshot`, `insertLog`, `getControl`, `updateControl`, `getSnapshots`, `saveSubscription`, `listSubscriptions`).
 - [ ] 3. [khó] `worker/index.ts` → Hono app: `GET /api/health`, bearer middleware cho `/api/*` (trừ health), `POST /api/ingest` (validate + upsert/increment + kiểm tra ngưỡng + auto-pause), `GET /api/status`, `PUT /api/control`, `POST /api/push/subscribe`; `worker/push.ts` → `sendPushToAll(env, payload)` (VAPID, xóa subscription trả 404/410). Chạy `npm run typecheck`.
 - [ ] 4. [vừa] `tests/api.spec.ts` + `tests/app.spec.ts` + `playwright.config.ts` → viết config (2 webServer, `workers: 1`, JSON reporter ra `test-results/results.json`, `use.baseURL = PLAYWRIGHT_BASE_URL ?? 'http://localhost:4817'`) và các test T1–T3. Chạy `npx playwright test` (cài browser nếu thiếu: `npx playwright install chromium`).
@@ -66,14 +66,19 @@ Verify mode: light
 
 ## Trạng thái hiện tại
 <!-- Tiến độ từng bước. Bước tạo/đổi giao diện ghi thêm MỘT dòng: Selectors: #id, .class, [data-x] (file chứa chúng). Bước test đọc dòng này trước khi grep code. -->
+- Bước 1 (xong): npm install OK (543 packages); `npm run build` OK — sinh `dist/index.html`, `dist/manifest.webmanifest`, `dist/sw.js` (injectManifest, 6 precache entries). Typecheck phần app (`tsc -p tsconfig.app.json --noEmit`) exit 0.
+- Selectors: [data-testid="app-title"] (src/App.tsx), #root (index.html)
+- Lưu ý: `npm run typecheck` (toàn bộ) sau bước 1 fail đúng chỗ `tsconfig.worker.json` với TS18003 vì `worker/` chưa có file TS nào — file worker theo plan thuộc bước 2–3; đây là hệ quả của script typecheck gộp 2 config, không phải lỗi của bước 1. Full typecheck được xác nhận lại sau bước 2.
+- Lưu ý: `src/sw.ts` bị exclude khỏi `tsconfig.app.json` (cần lib `webworker` riêng — trộn với lib DOM của app sẽ xung đột), nên sw.ts không nằm trong typecheck; `vite build` vẫn transpile sw.ts qua esbuild của vite-plugin-pwa.
+- Docs (README/AGENTS.md): theo plan sẽ cập nhật ở bước 5, chưa đụng tới ở bước 1–2.
 
 ## Test status
-- Lần chạy cuối:
+- Lần chạy cuối: chưa có spec nào (bước 4 sẽ viết tests/ + playwright.config.ts); bước 1–2 chỉ chạy typecheck/build theo plan.
 - Kết quả từng test:
   - T1: chưa viết
   - T2: chưa viết
   - T3: chưa viết
-- Fail chi tiết:
+- Fail chi tiết: -
 
 ## Verify
 <!-- Bước Verify tự điền: từng kịch bản đã kiểm tra trên trình duyệt, PASS/FAIL, screenshot, lỗi phát hiện, dòng kết luận cuối cùng. -->

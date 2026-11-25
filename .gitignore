@@ -3,6 +3,9 @@ dist/
 .env
 .env.*
 !.env.example
+.dev.vars
+.wrangler/
+.wrangler-test/
 .DS_Store
 test-results/
 playwright-report/
