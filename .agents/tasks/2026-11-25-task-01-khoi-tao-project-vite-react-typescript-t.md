@@ -45,7 +45,7 @@ Verify mode: light
 
 ## Plan
 - [x] 1. [vừa] `package.json` → khởi tạo frontend: tạo `package.json` (scripts như Ngữ cảnh), `vite.config.ts` (react, tailwind, VitePWA injectManifest, `server.proxy['/api'] = 'http://localhost:4818'`), `tsconfig.app.json`, `tsconfig.worker.json`, `index.html`, `src/main.tsx`, `src/App.tsx` (placeholder `<h1 data-testid="app-title">Agent Quota Dashboard</h1>`), `src/index.css` (`@import "tailwindcss"`), `src/sw.ts` (push + notificationclick), `public/icon.svg`; cập nhật `.gitignore`. Chạy `npm install`, `npm run build`.
-- [ ] 2. [vừa] `migrations/0001_init.sql` → tạo 4 bảng + seed `orchestrator_control`; `wrangler.toml`; `worker/types.ts` (`Env`, `Provider`, `QuotaSnapshot`, `IngestPayload`); `worker/db.ts` (hàm `upsertClaudeSnapshot`, `incrementOpencodeSnapshot`, `insertLog`, `getControl`, `updateControl`, `getSnapshots`, `saveSubscription`, `listSubscriptions`).
+- [x] 2. [vừa] `migrations/0001_init.sql` → tạo 4 bảng + seed `orchestrator_control`; `wrangler.toml`; `worker/types.ts` (`Env`, `Provider`, `QuotaSnapshot`, `IngestPayload`); `worker/db.ts` (hàm `upsertClaudeSnapshot`, `incrementOpencodeSnapshot`, `insertLog`, `getControl`, `updateControl`, `getSnapshots`, `saveSubscription`, `listSubscriptions`).
 - [ ] 3. [khó] `worker/index.ts` → Hono app: `GET /api/health`, bearer middleware cho `/api/*` (trừ health), `POST /api/ingest` (validate + upsert/increment + kiểm tra ngưỡng + auto-pause), `GET /api/status`, `PUT /api/control`, `POST /api/push/subscribe`; `worker/push.ts` → `sendPushToAll(env, payload)` (VAPID, xóa subscription trả 404/410). Chạy `npm run typecheck`.
 - [ ] 4. [vừa] `tests/api.spec.ts` + `tests/app.spec.ts` + `playwright.config.ts` → viết config (2 webServer, `workers: 1`, JSON reporter ra `test-results/results.json`, `use.baseURL = PLAYWRIGHT_BASE_URL ?? 'http://localhost:4817'`) và các test T1–T3. Chạy `npx playwright test` (cài browser nếu thiếu: `npx playwright install chromium`).
 - [ ] 5. [dễ] `README.md` → cập nhật: mô tả dự án, stack, cách chạy (`npm install`, `npm run dev`, `npm run dev:api`, migrate D1 local), biến môi trường, API; `AGENTS.md` → thay các mục TODO (Project Overview, Architecture, Codebase Map, Commands, Code Conventions, Test hook) bằng thông tin thật.
@@ -71,6 +71,9 @@ Verify mode: light
 - Lưu ý: `npm run typecheck` (toàn bộ) sau bước 1 fail đúng chỗ `tsconfig.worker.json` với TS18003 vì `worker/` chưa có file TS nào — file worker theo plan thuộc bước 2–3; đây là hệ quả của script typecheck gộp 2 config, không phải lỗi của bước 1. Full typecheck được xác nhận lại sau bước 2.
 - Lưu ý: `src/sw.ts` bị exclude khỏi `tsconfig.app.json` (cần lib `webworker` riêng — trộn với lib DOM của app sẽ xung đột), nên sw.ts không nằm trong typecheck; `vite build` vẫn transpile sw.ts qua esbuild của vite-plugin-pwa.
 - Docs (README/AGENTS.md): theo plan sẽ cập nhật ở bước 5, chưa đụng tới ở bước 1–2.
+- Bước 2 (xong): `npm run typecheck` exit 0 (cả tsconfig.app.json lẫn tsconfig.worker.json — full pass sau khi worker/types.ts + worker/db.ts tồn tại, khớp với Lưu ý ở trên). Đã apply `migrations/0001_init.sql` lên D1 local (persist `.wrangler-test`, gitignored, bằng đúng lệnh webServer của bước 4 kèm `rm -rf` trước): 6 commands OK, và SELECT xác nhận seed row `orchestrator_control` id=1 `running/90/80`. Không khởi động/không đụng bất kỳ process nào.
+- Lưu ý: `wrangler.toml` đang dùng `database_id` placeholder (00000000-...) chỉ hợp cho local dev; trước khi deploy thật phải thay bằng id D1 thật.
+- Lưu ý: `incrementOpencodeSnapshot` dùng `RETURNING cycle_tokens_used, cycle_token_limit` trong cùng 1 câu SQL upsert để lấy tổng mới một cách atomic (bước 3 cần giá trị này tính `usage_percent`).
 
 ## Test status
 - Lần chạy cuối: chưa có spec nào (bước 4 sẽ viết tests/ + playwright.config.ts); bước 1–2 chỉ chạy typecheck/build theo plan.
@@ -92,7 +95,7 @@ Lưu ý: UI dashboard, Realtime, host hooks nằm ngoài task này (Phase 2, 3);
 -
 
 ## Số liệu
-- Quota Claude:
-- Quota Go:
-- Số lần tự sửa:
-- Model dùng:
+- Quota Claude: (chưa đo — host hooks thuộc Phase 3)
+- Quota Go: (chưa đo — host hooks thuộc Phase 3)
+- Số lần tự sửa: 0 (bước 1: install/build/typecheck-app pass ngay lần đầu; bước 2: typecheck full + migration apply pass ngay lần đầu)
+- Model dùng: glm-5.3 (OpenCode)
