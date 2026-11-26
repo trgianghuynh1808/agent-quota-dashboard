@@ -2,7 +2,7 @@
 
 Unified multi-agent quota & telemetry dashboard for **Claude Code** and **OpenCode Go** (see `docs/SPEC.md`).
 
-This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status, threshold-based auto-pause and Web Push notifications, plus **Phase 3a**: a sample Claude Code hook that feeds `/api/ingest`. The PWA dashboard (Phase 2) and the remaining host hooks (OpenCode Go plugin, macOS setup guide) are **not implemented yet**.
+This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status/control/subscribe, threshold-based auto-pause and Web Push notifications, **Phase 3a**: a sample Claude Code hook that feeds `/api/ingest`, and **Phase 3b**: the OpenCode Go global plugin (`hooks/opencode/quota-sync.ts`) with a one-time usage backfill. The PWA dashboard (Phase 2) and the macOS setup guide are **not implemented yet**.
 
 ## Stack
 
@@ -27,6 +27,8 @@ api/
     supabase-db.ts     Db implementation using the service role key
     types.ts           shared types and the Db/notify interfaces
     validate.ts        manual payload validation
+hooks/opencode/
+  quota-sync.ts        OpenCode Go global plugin (message deltas + one-time backfill)
 src/                   placeholder React app (Phase 1)
 hooks/claude-code/     Claude Code hook: quota-ingest.sh + settings.example.json
 supabase/migrations/   SQL migrations (0001_init.sql = Phase 1 schema, 0002_realtime_read_policies.sql = Realtime read policies)
@@ -257,6 +259,32 @@ Send an initial snapshot once (for example after installing), passing the curren
 
 The payload maps `rate_limits.five_hour.used_percentage` → `window_5h_percent`, `rate_limits.seven_day.used_percentage` → `window_7d_percent`, `model.id` → `model`, `session_id` → `task_name`, and `rate_limits.five_hour.resets_at` (epoch seconds) → `reset_at` (ISO). The statusline JSON shape (`rate_limits.*`) is the currently known format; adjust the `jq` filter in the script if your Claude Code version differs.
 
+## OpenCode Go plugin
+
+`hooks/opencode/quota-sync.ts` is a global OpenCode plugin that reports OpenCode Go token usage to `POST /api/ingest` (`provider: "opencode_go"`). It is dependency-free and never blocks or breaks OpenCode: every network/DB/config error is swallowed, sends are fire-and-forget with a 5s timeout, and a missing `APP_URL`/`INGEST_API_KEY` turns it into a no-op.
+
+Install it on the host that runs OpenCode:
+
+1. `mkdir -p ~/.config/opencode/plugin`
+2. Copy `hooks/opencode/quota-sync.ts` into `~/.config/opencode/plugin/`.
+3. Export the env vars below in the shell that launches OpenCode (e.g. in your shell profile).
+4. Restart OpenCode.
+
+Behavior:
+
+- On each completed assistant message from `providerID: "opencode-go"` (`message.updated` with `time.completed`), it sends `delta_tokens = tokens.total` (plus `input_tokens`/`output_tokens`/`cache_read_tokens` for logging). Messages are deduped by message id, so a message is counted once.
+- On first run it calls `backfillInitialUsage()` once: sums `tokens.total` of assistant `opencode-go` messages from the last `OPENCODE_CYCLE_DAYS` days (default 30) in `~/.local/share/opencode/opencode.db` and sends that total as one delta. A state file `~/.config/opencode/quota-sync.state.json` records `{"backfilled":true}` so it never backfills again.
+
+Plugin environment variables (read from `process.env`, separate from the server-side table above):
+
+| Variable | Purpose |
+| --- | --- |
+| `APP_URL` | Base URL of the deployment, e.g. `https://your-app.vercel.app`. Required for the plugin to send anything. |
+| `INGEST_API_KEY` | Bearer token for `POST /api/ingest`. Required for the plugin to send anything. |
+| `AGENT_ID` | `agent_id` sent with every payload (default `opencode-go`). Optional. |
+| `OPENCODE_CYCLE_TOKEN_LIMIT` | If set, sent as `cycle_token_limit` so the API can compute the usage percentage. Optional. |
+| `OPENCODE_CYCLE_DAYS` | Backfill window in days (default `30`). Optional. |
+
 ## Commands
 
 ```bash
@@ -271,4 +299,5 @@ npx vitest run tests/api.test.ts   # run only the API spec
 ## Not implemented yet
 
 - **Phase 2 (PWA frontend):** dashboard UI, Supabase Realtime subscriptions, and service worker push registration (the `POST /api/subscribe` endpoint is already in place).
-- **Phase 3 (host hooks):** the Claude Code hook is implemented in `hooks/claude-code/`; the OpenCode Go global plugin with one-time backfill and the macOS setup guide are still to come.
+- **Phase 3 (host hooks):** the Claude Code hook (`hooks/claude-code/`) and the OpenCode Go plugin (`hooks/opencode/`) are implemented; the macOS setup guide is still to come.
+- **Phase 3c:** circuit breaker / follow-up work on top of the host hooks.
