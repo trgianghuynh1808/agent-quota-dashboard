@@ -12,5 +12,11 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["api/**/*.ts", "tests/**/*.ts", "vite.config.ts", "vitest.config.ts"]
+  "include": [
+    "api/**/*.ts",
+    "hooks/**/*.ts",
+    "tests/**/*.ts",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
 }
