@@ -34,7 +34,7 @@ Guidelines for coding agents working in this repo.
 - Main flow: plan on `task/<slug>` -> `handoff.sh` -> `watch-tasks.sh` runs `run-task.sh` -> Verify/review -> squash-merge and ship (see CLAUDE.md).
 - `api/` - Vercel Node API routes: `ingest.ts`, `status.ts`, `control.ts`, `subscribe.ts`, and `_lib/` (`types`, `auth`, `validate`, `ingest`, `supabase-db`, `push`).
 - `hooks/opencode/` - OpenCode Go global plugin (`quota-sync.ts`); copy into `~/.config/opencode/plugin/`.
-- `src/` - React placeholder app (`App.tsx`, `main.tsx`, `index.css`) plus pure dashboard helpers in `src/lib/quota.ts` (expiry/auto-reset, countdown, TPM, time-to-limit, cache ratio; all take `now` as a parameter); the dashboard UI comes in Phase 2.
+- `src/` - React placeholder app (`App.tsx`, `main.tsx`, `index.css`) plus pure dashboard helpers in `src/lib/quota.ts` (expiry/auto-reset, countdown, TPM, time-to-limit, cache ratio; all take `now` as a parameter) and `src/lib/anomaly.ts` (loop detection by `agent_id` over a 3-minute window, bucketed burn check; takes `now` as a parameter); the dashboard UI comes in Phase 2.
 - `hooks/claude-code/` - Claude Code hooks (`quota-ingest.sh`: statusline JSON on stdin → fire-and-forget `POST /api/ingest`, plus `--once <5h> <7d>`; `circuit-breaker.sh`: `GET /api/status` → exit 2 + stderr when `global_status` is `paused`, fail-open otherwise) and `settings.example.json` (statusLine + Stop + UserPromptSubmit/PreToolUse samples).
 - `supabase/migrations/` - SQL migrations; `0001_init.sql` holds the Phase 1 schema and `increment_opencode_usage`, `0002_realtime_read_policies.sql` adds the Realtime read policies.
 - `tests/` - Vitest specs and the in-memory `FakeDb` (`fake-db.ts`, `api.test.ts`).
