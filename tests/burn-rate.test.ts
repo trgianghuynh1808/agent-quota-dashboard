@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { LogEntry, QuotaSnapshot } from '../api/_lib/types.js'
+import type { LogEntry } from '../api/_lib/types.js'
 import { buildAgentFeed, buildBurnRate, type FeedTurn } from '../src/lib/burn-rate.js'
 
 const MS = 1_000
@@ -19,27 +19,8 @@ function makeTurn(id: string, at: number, e: LogEntry): FeedTurn {
 }
 
 describe('burn-rate helpers', () => {
-  it('T1: computes tpm, a single loop alert and time-to-limit for the opencode cycle', () => {
+  it('T1: computes tpm and a single loop alert without time-to-limit', () => {
     const now = 1_000_000_000_000
-    const resetAt = new Date(now + 3_600_000).toISOString()
-    const opencodeSnapshot: QuotaSnapshot = {
-      provider: 'opencode_go',
-      window_5h_percent: null,
-      window_7d_percent: null,
-      cycle_tokens_used: 9_000_000,
-      cycle_token_limit: 10_000_000,
-      reset_at: resetAt,
-      updated_at: new Date(now).toISOString(),
-    }
-    const claudeSnapshot: QuotaSnapshot = {
-      provider: 'claude_code',
-      window_5h_percent: 40,
-      window_7d_percent: 20,
-      cycle_tokens_used: 0,
-      cycle_token_limit: null,
-      reset_at: resetAt,
-      updated_at: new Date(now).toISOString(),
-    }
     const turns: FeedTurn[] = [
       makeTurn('a-0', now - 400 * MS, entry('a', 12_000)),
       makeTurn('a-1', now - 150 * MS, entry('a', 12_000)),
@@ -48,14 +29,12 @@ describe('burn-rate helpers', () => {
       makeTurn('b-1', now - 20 * MS, entry('b', 1_000)),
     ]
 
-    const burn = buildBurnRate(turns, [opencodeSnapshot], now)
+    const burn = buildBurnRate(turns, now)
 
     expect(burn.tpm).toBe(37_000 / 3)
     expect(burn.alerts).toHaveLength(1)
     expect(burn.alerts[0]).toMatchObject({ agentId: 'a', totalTokens: 36_000, turns: 3 })
-    expect(burn.timeToLimitMs).toBe((1_000_000 / burn.tpm) * 60_000)
-
-    expect(buildBurnRate(turns, [claudeSnapshot], now).timeToLimitMs).toBeNull()
+    expect('timeToLimitMs' in burn).toBe(false)
   })
 
   it('T2: sorts the feed newest first, computes cache ratio, defaults and applies limits', () => {

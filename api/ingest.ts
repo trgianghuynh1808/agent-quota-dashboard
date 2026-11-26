@@ -1,14 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { isAuthorized } from './_lib/auth.js'
-import { processIngest, type Notify } from './_lib/ingest.js'
-import { createPushNotifier } from './_lib/push.js'
+import { processIngest } from './_lib/ingest.js'
 import { createSupabaseDb } from './_lib/supabase-db.js'
 import type { Db } from './_lib/types.js'
 import { parseIngestPayload } from './_lib/validate.js'
 
 export interface IngestHandlerDeps {
   db: Db
-  notify: Notify
   apiKey: string | undefined
 }
 
@@ -31,11 +29,10 @@ export function createIngestHandler(deps: IngestHandlerDeps) {
     }
 
     try {
-      const result = await processIngest(deps.db, parsed.value, deps.notify)
+      const result = await processIngest(deps.db, parsed.value)
       res.status(200).json({
         ok: true,
         global_status: result.global_status,
-        paused_now: result.paused_now,
       })
     } catch (error) {
       console.error('ingest failed', error)
@@ -46,6 +43,5 @@ export function createIngestHandler(deps: IngestHandlerDeps) {
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   const db = createSupabaseDb()
-  const notify = createPushNotifier()
-  return createIngestHandler({ db, notify, apiKey: process.env.INGEST_API_KEY })(req, res)
+  return createIngestHandler({ db, apiKey: process.env.INGEST_API_KEY })(req, res)
 }

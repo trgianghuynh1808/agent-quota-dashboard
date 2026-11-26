@@ -6,7 +6,6 @@ import type {
   LogEntry,
   OpencodeWindow,
   Provider,
-  PushSubscriptionInput,
   QuotaSnapshot,
 } from '../api/_lib/types.js'
 
@@ -17,14 +16,11 @@ export interface FakeDbOptions {
 export class FakeDb implements Db {
   readonly logs: LogEntry[] = []
   readonly control: Control
-  readonly subscriptions = new Map<string, PushSubscriptionInput>()
   private readonly snapshots = new Map<Provider, QuotaSnapshot>()
 
   constructor(options: FakeDbOptions = {}) {
     this.control = {
       global_status: 'running',
-      auto_pause_threshold: 90,
-      downgrade_model_threshold: 80,
       ...options.control,
     }
   }
@@ -49,19 +45,14 @@ export class FakeDb implements Db {
     return snapshot
   }
 
-  async incrementOpencode(
-    deltaTokens: number,
-    cycleTokenLimit?: number | null,
-    resetAt?: string | null,
-  ): Promise<QuotaSnapshot> {
+  async incrementOpencode(deltaTokens: number, resetAt?: string | null): Promise<QuotaSnapshot> {
     const previous = this.snapshots.get('opencode_go')
     const snapshot: QuotaSnapshot = {
       provider: 'opencode_go',
       window_5h_percent: previous?.window_5h_percent ?? null,
       window_7d_percent: previous?.window_7d_percent ?? null,
       cycle_tokens_used: (previous?.cycle_tokens_used ?? 0) + deltaTokens,
-      cycle_token_limit:
-        cycleTokenLimit == null ? (previous?.cycle_token_limit ?? null) : cycleTokenLimit,
+      cycle_token_limit: previous?.cycle_token_limit ?? null,
       reset_at: resetAt ?? previous?.reset_at ?? null,
       updated_at: new Date().toISOString(),
     }
@@ -92,10 +83,6 @@ export class FakeDb implements Db {
     return { ...this.control }
   }
 
-  async setPaused(): Promise<void> {
-    this.control.global_status = 'paused'
-  }
-
   async updateControl(patch: ControlPatch): Promise<Control> {
     Object.assign(this.control, patch)
     return { ...this.control }
@@ -103,9 +90,5 @@ export class FakeDb implements Db {
 
   async listSnapshots(): Promise<QuotaSnapshot[]> {
     return Array.from(this.snapshots.values())
-  }
-
-  async upsertPushSubscription(sub: PushSubscriptionInput): Promise<void> {
-    this.subscriptions.set(sub.endpoint, { ...sub })
   }
 }

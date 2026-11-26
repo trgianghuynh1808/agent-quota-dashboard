@@ -47,8 +47,6 @@ export interface TurnRow {
 
 export interface ControlRow {
   global_status: string | null
-  auto_pause_threshold: number | string | null
-  downgrade_model_threshold: number | string | null
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -124,8 +122,6 @@ export function rowToTurn(row: TurnRow): FeedTurn {
 export function rowToControl(row: ControlRow): Control {
   return {
     global_status: toGlobalStatus(row.global_status),
-    auto_pause_threshold: toNumber(row.auto_pause_threshold),
-    downgrade_model_threshold: toNumber(row.downgrade_model_threshold),
   }
 }
 
@@ -148,8 +144,6 @@ export interface LiveState {
 
 export const DEFAULT_CONTROL: Control = {
   global_status: 'running',
-  auto_pause_threshold: 90,
-  downgrade_model_threshold: 80,
 }
 
 export function startLive(source: LiveSource, onState: (state: LiveState) => void): () => void {

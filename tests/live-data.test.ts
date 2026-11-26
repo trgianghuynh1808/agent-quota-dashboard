@@ -68,14 +68,8 @@ describe('live-data', () => {
     expect(turn.entry.agent_id).toBe('claude-main')
     expect(turn.entry.input_tokens).toBe(2_500)
 
-    const control = rowToControl({
-      global_status: 'paused',
-      auto_pause_threshold: '95',
-      downgrade_model_threshold: 85,
-    })
-    expect(control.global_status).toBe('paused')
-    expect(control.auto_pause_threshold).toBe(95)
-    expect(control.downgrade_model_threshold).toBe(85)
+    const control = rowToControl({ global_status: 'paused' })
+    expect(control).toEqual({ global_status: 'paused' })
   })
 
   it('T2: upserts snapshots by provider and prepends turns without duplicates', () => {
@@ -110,8 +104,6 @@ describe('live-data', () => {
     const fetchedTurns: FeedTurn[] = [makeTurn('t1', 'go-helper'), makeTurn('t2', 'claude-main')]
     const runningControl: Control = {
       global_status: 'running',
-      auto_pause_threshold: 90,
-      downgrade_model_threshold: 80,
     }
     const source: LiveSource = {
       async fetchSnapshots() {
@@ -140,11 +132,7 @@ describe('live-data', () => {
     expect(states[0].control.global_status).toBe('running')
 
     expect(handlers).toBeDefined()
-    handlers!.onControl({
-      global_status: 'paused',
-      auto_pause_threshold: 90,
-      downgrade_model_threshold: 80,
-    })
+    handlers!.onControl({ global_status: 'paused' })
     expect(states[states.length - 1].control.global_status).toBe('paused')
 
     stop()

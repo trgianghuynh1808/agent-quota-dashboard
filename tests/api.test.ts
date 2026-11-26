@@ -1,11 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createIngestHandler } from '../api/ingest.js'
-import type { Notify } from '../api/_lib/ingest.js'
 import type { QuotaSnapshot } from '../api/_lib/types.js'
 import { createControlHandler } from '../api/control.js'
 import { createStatusHandler } from '../api/status.js'
-import { createSubscribeHandler } from '../api/subscribe.js'
 import { FakeDb } from './fake-db.js'
 
 const API_KEY = 'k'
@@ -18,12 +16,6 @@ interface CallOptions {
 }
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void>
-
-interface ControlBody {
-  global_status: string
-  auto_pause_threshold: number
-  downgrade_model_threshold: number
-}
 
 function createRes() {
   const res = {
@@ -52,12 +44,8 @@ async function call(handler: Handler, options: CallOptions = {}) {
   return res
 }
 
-function pausedNow(res: { body: unknown }): boolean {
-  return (res.body as { paused_now?: boolean }).paused_now === true
-}
-
-function makeIngest(db: FakeDb, notify: Notify) {
-  return createIngestHandler({ db, notify, apiKey: API_KEY })
+function makeIngest(db: FakeDb) {
+  return createIngestHandler({ db, apiKey: API_KEY })
 }
 
 function makeStatus(db: FakeDb) {
@@ -68,10 +56,6 @@ function makeControl(db: FakeDb) {
   return createControlHandler({ db, apiKey: API_KEY })
 }
 
-function makeSubscribe(db: FakeDb) {
-  return createSubscribeHandler({ db, apiKey: API_KEY })
-}
-
 function findByProvider(snapshots: QuotaSnapshot[], provider: string) {
   return snapshots.find((snapshot) => snapshot.provider === provider)
 }
@@ -79,8 +63,7 @@ function findByProvider(snapshots: QuotaSnapshot[], provider: string) {
 describe('T1: auth and validation', () => {
   it('rejects bad auth, method and payload without logging', async () => {
     const db = new FakeDb()
-    const notify = vi.fn<Notify>()
-    const ingest = makeIngest(db, notify)
+    const ingest = makeIngest(db)
     const status = makeStatus(db)
 
     const missingAuth = await call(ingest, { body: {} })
@@ -120,8 +103,7 @@ describe('T1: auth and validation', () => {
 describe('T2: ingest updates snapshots', () => {
   it('overwrites claude percentages and accumulates opencode tokens', async () => {
     const db = new FakeDb()
-    const notify = vi.fn<Notify>().mockResolvedValue(undefined)
-    const ingest = makeIngest(db, notify)
+    const ingest = makeIngest(db)
     const status = makeStatus(db)
 
     const first = await call(ingest, {
@@ -137,7 +119,7 @@ describe('T2: ingest updates snapshots', () => {
       },
     })
     expect(first.statusCode).toBe(200)
-    expect(pausedNow(first)).toBe(false)
+    expect(first.body).toEqual({ ok: true, global_status: 'running' })
 
     const second = await call(ingest, {
       headers: AUTH,
@@ -149,7 +131,6 @@ describe('T2: ingest updates snapshots', () => {
       },
     })
     expect(second.statusCode).toBe(200)
-    expect(pausedNow(second)).toBe(false)
 
     const opencodeFirst = await call(ingest, {
       headers: AUTH,
@@ -184,20 +165,18 @@ describe('T2: ingest updates snapshots', () => {
 
     const opencode = findByProvider(body.snapshots, 'opencode_go')
     expect(opencode?.cycle_tokens_used).toBe(150)
-    expect(opencode?.cycle_token_limit).toBe(1000)
+    expect(opencode?.cycle_token_limit).toBeNull()
 
     expect(db.logs.length).toBe(4)
     expect(db.logs[0].input_tokens).toBe(10)
     expect(db.logs[0].cache_read_tokens).toBe(3)
-    expect(notify).not.toHaveBeenCalled()
   })
 })
 
 describe('T4: claude reset_7d_at', () => {
   it('persists reset_7d_at and rejects a non-ISO value', async () => {
     const db = new FakeDb()
-    const notify = vi.fn<Notify>().mockResolvedValue(undefined)
-    const ingest = makeIngest(db, notify)
+    const ingest = makeIngest(db)
     const reset5h = new Date(1790000000 * 1000).toISOString()
     const reset7d = new Date(1790500000 * 1000).toISOString()
 
@@ -237,8 +216,7 @@ describe('T4: claude reset_7d_at', () => {
 describe('T22: opencode quota windows', () => {
   it('T1: window_id được validate, lưu vào snapshot, không ghi log, không đụng token', async () => {
     const db = new FakeDb()
-    const notify = vi.fn<Notify>().mockResolvedValue(undefined)
-    const ingest = makeIngest(db, notify)
+    const ingest = makeIngest(db)
     const reset5h = '2026-12-01T00:00:00.000Z'
     const reset7d = '2026-12-05T00:00:00.000Z'
 
@@ -302,7 +280,6 @@ describe('T22: opencode quota windows', () => {
     expect(missingPercent.statusCode).toBe(400)
 
     expect(db.logs.length).toBe(0)
-    expect(notify).not.toHaveBeenCalled()
 
     const opencode = findByProvider(await db.listSnapshots(), 'opencode_go')
     expect(opencode?.cycle_tokens_used).toBe(0)
@@ -318,44 +295,19 @@ describe('T22: opencode quota windows', () => {
 })
 
 describe('POST /api/control', () => {
-  it('T1: applies partial updates and keeps fields not sent', async () => {
+  it('T1: toggles global_status between paused and running', async () => {
     const db = new FakeDb()
     const control = makeControl(db)
-    const status = makeStatus(db)
 
     const pause = await call(control, { headers: AUTH, body: { global_status: 'paused' } })
     expect(pause.statusCode).toBe(200)
-    const pauseBody = pause.body as {
-      ok: boolean
-      global_status: string
-      auto_pause_threshold: number
-      downgrade_model_threshold: number
-    }
-    expect(pauseBody.ok).toBe(true)
-    expect(pauseBody.global_status).toBe('paused')
-    expect(pauseBody.auto_pause_threshold).toBe(90)
-    expect(pauseBody.downgrade_model_threshold).toBe(80)
+    expect(pause.body).toEqual({ ok: true, global_status: 'paused' })
+    expect(db.control.global_status).toBe('paused')
 
-    const thresholds = await call(control, {
-      headers: AUTH,
-      body: { auto_pause_threshold: 95, downgrade_model_threshold: 85 },
-    })
-    expect(thresholds.statusCode).toBe(200)
-    const thresholdsBody = thresholds.body as {
-      global_status: string
-      auto_pause_threshold: number
-      downgrade_model_threshold: number
-    }
-    expect(thresholdsBody.global_status).toBe('paused')
-    expect(thresholdsBody.auto_pause_threshold).toBe(95)
-    expect(thresholdsBody.downgrade_model_threshold).toBe(85)
-
-    const statusRes = await call(status, { method: 'GET', headers: AUTH })
-    expect(statusRes.statusCode).toBe(200)
-    const statusBody = statusRes.body as ControlBody
-    expect(statusBody.global_status).toBe(db.control.global_status)
-    expect(statusBody.auto_pause_threshold).toBe(db.control.auto_pause_threshold)
-    expect(statusBody.downgrade_model_threshold).toBe(db.control.downgrade_model_threshold)
+    const resume = await call(control, { headers: AUTH, body: { global_status: 'running' } })
+    expect(resume.statusCode).toBe(200)
+    expect(resume.body).toEqual({ ok: true, global_status: 'running' })
+    expect(db.control.global_status).toBe('running')
   })
 
   it('T2: rejects bad auth and method without changing the db', async () => {
@@ -389,163 +341,65 @@ describe('POST /api/control', () => {
     expect(badStatus.statusCode).toBe(400)
     expect(typeof (badStatus.body as { error: unknown }).error).toBe('string')
 
-    const badThreshold = await call(control, {
-      headers: AUTH,
-      body: { auto_pause_threshold: 150 },
-    })
-    expect(badThreshold.statusCode).toBe(400)
-    expect(typeof (badThreshold.body as { error: unknown }).error).toBe('string')
-
-    const crossed = await call(control, {
-      headers: AUTH,
-      body: { auto_pause_threshold: 70 },
-    })
-    expect(crossed.statusCode).toBe(400)
-    expect(typeof (crossed.body as { error: unknown }).error).toBe('string')
-
     expect(db.control.global_status).toBe('running')
-    expect(db.control.auto_pause_threshold).toBe(90)
-    expect(db.control.downgrade_model_threshold).toBe(80)
   })
 })
 
-describe('subscribe', () => {
-  it('T1: stores and overwrites a subscription by endpoint', async () => {
+describe('T23-T1: ingest không tự pause, control chỉ còn pause thủ công', () => {
+  it('stays running at 100% quota, only global_status is accepted', async () => {
     const db = new FakeDb()
-    const subscribe = makeSubscribe(db)
-    const endpoint = `https://push.example/${Date.now()}`
-
-    const first = await call(subscribe, {
-      headers: AUTH,
-      body: { endpoint, keys: { p256dh: 'p1', auth: 'a1' } },
-    })
-    expect(first.statusCode).toBe(200)
-    expect((first.body as { ok: boolean }).ok).toBe(true)
-
-    const second = await call(subscribe, {
-      headers: AUTH,
-      body: { endpoint, keys: { p256dh: 'p2', auth: 'a1' } },
-    })
-    expect(second.statusCode).toBe(200)
-    expect((second.body as { ok: boolean }).ok).toBe(true)
-
-    expect(db.subscriptions.size).toBe(1)
-    expect(db.subscriptions.get(endpoint)?.p256dh).toBe('p2')
-  })
-
-  it('T2: rejects bad auth, method and body without saving', async () => {
-    const db = new FakeDb()
-    const subscribe = makeSubscribe(db)
-    const endpoint = `https://push.example/${Date.now()}`
-
-    const missingAuth = await call(subscribe, {
-      body: { endpoint, keys: { p256dh: 'p1', auth: 'a1' } },
-    })
-    expect(missingAuth.statusCode).toBe(401)
-
-    const wrongMethod = await call(subscribe, { method: 'GET', headers: AUTH })
-    expect(wrongMethod.statusCode).toBe(405)
-
-    const missingKeys = await call(subscribe, { headers: AUTH, body: { endpoint } })
-    expect(missingKeys.statusCode).toBe(400)
-
-    const insecureEndpoint = await call(subscribe, {
-      headers: AUTH,
-      body: { endpoint: 'http://x', keys: { p256dh: 'p1', auth: 'a1' } },
-    })
-    expect(insecureEndpoint.statusCode).toBe(400)
-
-    expect(db.subscriptions.size).toBe(0)
-  })
-})
-
-describe('T3: auto-pause and push notification', () => {
-  it('pauses once when claude crosses the threshold', async () => {
-    const db = new FakeDb({ control: { auto_pause_threshold: 90 } })
-    const notify = vi.fn<Notify>().mockResolvedValue(undefined)
-    const ingest = makeIngest(db, notify)
+    const agentId = `agent-${Date.now()}`
+    const ingest = makeIngest(db)
+    const control = makeControl(db)
     const status = makeStatus(db)
 
-    const below = await call(ingest, {
+    const claude = await call(ingest, {
       headers: AUTH,
       body: {
         provider: 'claude_code',
-        agent_id: 'a1',
-        window_5h_percent: 89,
-        window_7d_percent: 10,
+        agent_id: agentId,
+        window_5h_percent: 100,
+        window_7d_percent: 100,
       },
     })
-    expect(pausedNow(below)).toBe(false)
+    expect(claude.statusCode).toBe(200)
+    expect(claude.body).toEqual({ ok: true, global_status: 'running' })
+    expect(db.control.global_status).toBe('running')
 
-    const statusRunning = await call(status, { method: 'GET', headers: AUTH })
-    expect((statusRunning.body as { global_status: string }).global_status).toBe('running')
-
-    const crossing = await call(ingest, {
-      headers: AUTH,
-      body: {
-        provider: 'claude_code',
-        agent_id: 'a1',
-        window_5h_percent: 40,
-        window_7d_percent: 91,
-      },
-    })
-    expect(pausedNow(crossing)).toBe(true)
-    expect(db.control.global_status).toBe('paused')
-    expect(notify).toHaveBeenCalledTimes(1)
-
-    const alreadyPaused = await call(ingest, {
-      headers: AUTH,
-      body: {
-        provider: 'claude_code',
-        agent_id: 'a1',
-        window_5h_percent: 95,
-        window_7d_percent: 95,
-      },
-    })
-    expect(pausedNow(alreadyPaused)).toBe(false)
-    expect(notify).toHaveBeenCalledTimes(1)
-  })
-
-  it('pauses opencode when usage equals the threshold', async () => {
-    const db = new FakeDb({ control: { auto_pause_threshold: 90 } })
-    const notify = vi.fn<Notify>().mockResolvedValue(undefined)
-    const ingest = makeIngest(db, notify)
-
-    const result = await call(ingest, {
+    const opencode = await call(ingest, {
       headers: AUTH,
       body: {
         provider: 'opencode_go',
-        agent_id: 'a1',
-        delta_tokens: 90,
-        cycle_token_limit: 100,
+        agent_id: agentId,
+        window_id: '30d',
+        window_percent: 100,
+        reset_at: new Date(Date.now() + 3_600_000).toISOString(),
       },
     })
+    expect(opencode.statusCode).toBe(200)
+    expect(opencode.body).toEqual({ ok: true, global_status: 'running' })
+    expect(db.control.global_status).toBe('running')
 
-    expect(pausedNow(result)).toBe(true)
-    expect(db.control.global_status).toBe('paused')
-    expect(notify).toHaveBeenCalledTimes(1)
-  })
+    const pause = await call(control, { headers: AUTH, body: { global_status: 'paused' } })
+    expect(pause.statusCode).toBe(200)
+    expect(pause.body).toEqual({ ok: true, global_status: 'paused' })
 
-  it('still pauses when the notification fails', async () => {
-    const db = new FakeDb({ control: { auto_pause_threshold: 90 } })
-    const notify = vi.fn<Notify>().mockRejectedValue(new Error('push down'))
-    const ingest = makeIngest(db, notify)
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    const result = await call(ingest, {
+    const threshold = await call(control, {
       headers: AUTH,
-      body: {
-        provider: 'claude_code',
-        agent_id: 'a1',
-        window_5h_percent: 99,
-        window_7d_percent: 10,
-      },
+      body: { auto_pause_threshold: 95 },
     })
+    expect(threshold.statusCode).toBe(400)
 
-    expect(result.statusCode).toBe(200)
-    expect(pausedNow(result)).toBe(true)
+    const empty = await call(control, { headers: AUTH, body: {} })
+    expect(empty.statusCode).toBe(400)
     expect(db.control.global_status).toBe('paused')
 
-    errorSpy.mockRestore()
+    const statusRes = await call(status, { method: 'GET', headers: AUTH })
+    expect(statusRes.statusCode).toBe(200)
+    const statusBody = statusRes.body as { global_status: string; snapshots: QuotaSnapshot[] }
+    expect(statusBody.global_status).toBe('paused')
+    expect(Array.isArray(statusBody.snapshots)).toBe(true)
+    expect('auto_pause_threshold' in statusBody).toBe(false)
+    expect('downgrade_model_threshold' in statusBody).toBe(false)
   })
 })

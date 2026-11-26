@@ -12,8 +12,6 @@ import type {
 
 const DEFAULT_CONTROL: Control = {
   global_status: 'running',
-  auto_pause_threshold: 90,
-  downgrade_model_threshold: 80,
 }
 
 const TURNS_LIMIT = 200

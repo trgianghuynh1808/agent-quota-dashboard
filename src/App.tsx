@@ -2,7 +2,6 @@ import { useMemo } from 'react'
 import { ActiveAgentsFeed } from './components/ActiveAgentsFeed.js'
 import { BurnRateMonitor } from './components/BurnRateMonitor.js'
 import { CircuitBreakerControls } from './components/CircuitBreakerControls.js'
-import { PushOnboardingBanner } from './components/PushOnboardingBanner.js'
 import { QuotaHealthCards } from './components/QuotaHealthCards.js'
 import { useLiveData } from './hooks/useLiveData.js'
 import { useNow } from './hooks/useNow.js'
@@ -25,7 +24,7 @@ export default function App() {
         : createMockControlApi(),
     [live, control],
   )
-  const controlKey = `${control.global_status}:${control.auto_pause_threshold}:${control.downgrade_model_threshold}`
+  const controlKey = control.global_status
 
   return (
     <main
@@ -33,9 +32,8 @@ export default function App() {
       data-mode={live ? 'live' : 'mock'}
       className="grid grid-cols-1 gap-4 p-4 md:grid-cols-3"
     >
-      <PushOnboardingBanner />
       <QuotaHealthCards snapshots={snapshots} now={now} />
-      <BurnRateMonitor turns={turns} snapshots={snapshots} now={now} />
+      <BurnRateMonitor turns={turns} now={now} />
       <CircuitBreakerControls key={controlKey} api={controlApi} />
       <div className="md:col-span-3">
         <ActiveAgentsFeed turns={turns} now={now} />

@@ -22,7 +22,6 @@ export interface ClaudeCodeIngest extends IngestBase {
 export interface OpencodeGoIngest extends IngestBase {
   provider: 'opencode_go'
   delta_tokens: number
-  cycle_token_limit?: number
   window_id?: OpencodeWindow['id']
   window_percent?: number
 }
@@ -49,8 +48,6 @@ export interface QuotaSnapshot {
 
 export interface Control {
   global_status: GlobalStatus
-  auto_pause_threshold: number
-  downgrade_model_threshold: number
 }
 
 export type ControlPatch = Partial<Control>
@@ -65,24 +62,12 @@ export interface LogEntry {
   cache_read_tokens: number
 }
 
-export interface PushSubscriptionInput {
-  endpoint: string
-  p256dh: string
-  auth: string
-}
-
 export interface Db {
   insertLog(entry: LogEntry): Promise<void>
-  upsertPushSubscription(sub: PushSubscriptionInput): Promise<void>
   upsertClaudeSnapshot(payload: ClaudeCodeIngest): Promise<QuotaSnapshot>
-  incrementOpencode(
-    deltaTokens: number,
-    cycleTokenLimit?: number | null,
-    resetAt?: string | null,
-  ): Promise<QuotaSnapshot>
+  incrementOpencode(deltaTokens: number, resetAt?: string | null): Promise<QuotaSnapshot>
   setOpencodeWindow(window: OpencodeWindow): Promise<QuotaSnapshot>
   getControl(): Promise<Control>
-  setPaused(): Promise<void>
   updateControl(patch: ControlPatch): Promise<Control>
   listSnapshots(): Promise<QuotaSnapshot[]>
 }
