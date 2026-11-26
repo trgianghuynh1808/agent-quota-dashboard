@@ -729,6 +729,32 @@ def timeline_block(shipped_tasks):
     return out
 
 
+def adopt_plan_files(lines, stg):
+    """A plan file of a board task can be left uncommitted (the squash did not take it, or the Tech Lead was cut off before the
+    commit). That is history, not user work: commit it on the staging branch so it does not block /ship. Plans of unknown tasks
+    are left alone. Returns the committed paths."""
+    if git("branch", "--show-current")[1].strip() != stg:
+        return []
+    slugs = [t["slug"] for t in tasks(lines)]
+    rc, out = git("status", "--porcelain", "--untracked-files=all", "--", f"{AG}/tasks")
+    mine = []
+    for l in out.splitlines() if rc == 0 else []:
+        path = l[3:].strip()
+        if "_TEMPLATE" in path or not path.endswith(".md"):
+            continue
+        if any(s in os.path.basename(path) for s in slugs):
+            mine.append(path)
+    if not mine:
+        return []
+    if git("add", "--", *mine)[0] != 0:
+        return []
+    names = ", ".join(os.path.basename(p) for p in mine)
+    if git("commit", "-q", "-m", f"docs: commit leftover task plan ({len(mine)})", "-m", names, "--", *mine)[0] != 0:
+        git("reset", "-q", "--", *mine)
+        return []
+    return mine
+
+
 def cmd_ship():
     lines = read_board()
     phase = get_phase(lines)
@@ -736,10 +762,15 @@ def cmd_ship():
         return f"Chưa có gì chờ duyệt ship hết (đang ở giai đoạn **{phase}**) 🙈"
     e = read_env()
     main, stg = e.get("MAIN_BRANCH", "main"), e.get("STAGING_BRANCH", "staging")
+    adopted = adopt_plan_files(lines, stg)
     rc, out = git("status", "--porcelain")
     if out:
+        orphans = {l[3:].strip() for l in out.splitlines()
+                   if l[3:].strip().startswith(f"{AG}/tasks/")}
         return ("Khoan đã, mình chưa ship được vì cây git còn file chưa commit ⚠️\n"
-                + "\n".join(f"- `{l[3:].strip()}`" for l in out.splitlines()[:8])
+                + "\n".join(f"- `{l[3:].strip()}`" + (" (plan không thuộc task nào trên board: commit nếu cần giữ, xoá nếu đã bỏ)"
+                                                      if l[3:].strip() in orphans else "")
+                            for l in out.splitlines()[:8])
                 + "\nBạn commit hoặc bỏ mấy file này rồi gõ `/ship` lại nhé.")
     has_remote = bool(git("remote")[1])
     rc, out = git("checkout", main)
@@ -796,6 +827,21 @@ def ensure_plan_on_disk(slug):
     return plan_path(slug)
 
 
+ENV_FILE_RE = re.compile(r"(?<![\w.])\.env(?!\.example)(\.[\w.]+)?\b")
+NEGATION_RE = re.compile(r"\b(không|khong|đừng|never|not|no|without|don't)\b", re.I)
+
+
+def plan_touches_env(text):
+    """True when a step of the plan works on a .env file. Only the "## Plan" section counts (the context and decisions often say where
+    env values live or promise not to touch them), and a mention after a negation ("KHÔNG sửa .env") is not a touch."""
+    m = re.search(r"^## Plan\b.*?(?=^## |\Z)", text, re.M | re.S)
+    for line in (m.group(0) if m else text).split("\n"):
+        for hit in ENV_FILE_RE.finditer(line):
+            if not NEGATION_RE.search(line[:hit.start()]):
+                return True
+    return False
+
+
 def cmd_check_plan(slug):
     p = ensure_plan_on_disk(slug)
     if not p or not os.path.exists(p):
@@ -804,7 +850,7 @@ def cmd_check_plan(slug):
     steps = re.findall(r"^- \[[ x]\] \d+\. .*$", text, re.M)
     if not steps:
         return "BLOCK: plan không có bước nào theo mẫu '- [ ] N. [dễ|vừa|khó] ...'"
-    if re.search(r"(?<![\w.])\.env(?!\.example)(\.[\w.]+)?\b", text):
+    if plan_touches_env(text):
         return "BLOCK: plan đụng tới file .env"
     if re.search(r"DROP\s+(TABLE|DATABASE|SCHEMA)|TRUNCATE\s|DELETE\s+FROM", text, re.I):
         return "BLOCK: plan có thao tác xoá dữ liệu (DROP/TRUNCATE/DELETE FROM)"
@@ -1687,6 +1733,35 @@ def cmd_claude_result(role, label, model):
     return 0
 
 
+READ_ONLY = False   # set while answering during a Claude call: must not write the board the Tech Lead is editing
+READ_ONLY_CMDS = ("/status", "/usage")
+
+
+def cmd_inbox_ro():
+    """Answer the read-only commands waiting in the inbox (/status, /usage) while a long Claude call blocks the daemon loop.
+    Everything else stays queued for the daemon. Prints nothing."""
+    global READ_ONLY
+    READ_ONLY = True
+    for f in sorted(glob.glob(f"{AG}/inbox/*.json")):
+        try:
+            with open(f, encoding="utf8") as fh:
+                cmd = json.load(fh).get("command")
+        except (OSError, ValueError):
+            continue
+        if cmd not in READ_ONLY_CMDS:
+            continue
+        dest = f"{AG}/inbox/processed/{os.path.basename(f)}"
+        try:
+            os.replace(f, dest)   # claim the file first, so the daemon cannot answer it a second time
+        except OSError:
+            continue
+        try:
+            cmd_inbox(dest)
+        except Exception as e:   # noqa: BLE001
+            sys.stderr.write(f"inbox-ro {os.path.basename(f)}: {e}\n")
+    return 0
+
+
 def cmd_inbox(path):
     with open(path, encoding="utf8") as f:
         d = json.load(f)
@@ -1694,7 +1769,8 @@ def cmd_inbox(path):
     args = (d.get("args") or "").strip()
     e = read_env()
     if cmd == "/status":
-        write_board(read_board())   # refresh the settings block in case room.env was edited by hand
+        if not READ_ONLY:
+            write_board(read_board())   # refresh the settings block in case room.env was edited by hand
         reply = status_text()
     elif cmd == "/stop":
         reply = cmd_stop()
@@ -1748,6 +1824,8 @@ def main(argv):
     c, a = argv[1], argv[2:]
     if c == "inbox":
         return cmd_inbox(a[0])
+    if c == "inbox-ro":
+        return cmd_inbox_ro()
     if c == "task-id":   # task-id <slug|task file>: print the task id (T12) so shell callers can name the task in their messages
         key = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", os.path.basename(a[0]).removesuffix(".md")) if a else ""
         print(next((t["id"] for t in tasks(read_board()) if t["slug"] == key), ""))

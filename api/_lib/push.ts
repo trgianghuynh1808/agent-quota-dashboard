@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { sendNotification, setVapidDetails } from 'web-push'
+import webpush from 'web-push'
 import type { Notify } from './ingest.js'
 
 interface PushEnv {
@@ -42,7 +42,7 @@ function isGone(reason: unknown): boolean {
 export function createPushNotifier(): Notify {
   return async (message) => {
     const env = getEnv()
-    setVapidDetails(env.vapidSubject, env.vapidPublicKey, env.vapidPrivateKey)
+    webpush.setVapidDetails(env.vapidSubject, env.vapidPublicKey, env.vapidPrivateKey)
 
     const client = createClient(env.url, env.serviceRoleKey, {
       auth: { persistSession: false },
@@ -59,7 +59,7 @@ export function createPushNotifier(): Notify {
     const payload = JSON.stringify(message)
     const results = await Promise.allSettled(
       subscriptions.map((subscription) =>
-        sendNotification(
+        webpush.sendNotification(
           {
             endpoint: subscription.endpoint,
             keys: { p256dh: subscription.p256dh, auth: subscription.auth },
