@@ -2,7 +2,7 @@
 
 Unified multi-agent quota & telemetry dashboard for **Claude Code** and **OpenCode Go** (see `docs/SPEC.md`).
 
-This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status/control/subscribe, threshold-based auto-pause and Web Push notifications, **Phase 3a**: a sample Claude Code hook that feeds `/api/ingest`, and **Phase 3b**: the OpenCode Go global plugin (`hooks/opencode/quota-sync.ts`) with a one-time usage backfill. **Phase 2** is partially built: the dashboard renders from mock data (quota health cards, Burn Rate & Anomaly Monitor, Active Agents Feed); Supabase Realtime wiring and service worker push registration are still pending. This README ships a [macOS setup guide](#macos-setup-guide-phase-3d).
+This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status/control/subscribe, threshold-based auto-pause and Web Push notifications, **Phase 3a**: a sample Claude Code hook that feeds `/api/ingest`, and **Phase 3b**: the OpenCode Go global plugin (`hooks/opencode/quota-sync.ts`) with a one-time usage backfill. **Phase 2** is partially built: the dashboard renders from mock data (quota health cards, Burn Rate & Anomaly Monitor, Active Agents Feed, remote Circuit Breaker controls over a mock control API); Supabase Realtime wiring and service worker push registration are still pending. This README ships a [macOS setup guide](#macos-setup-guide-phase-3d).
 
 ## Stack
 
@@ -30,9 +30,9 @@ api/
 hooks/opencode/
   quota-sync.ts        OpenCode Go global plugin (message deltas + one-time backfill)
 src/
-  App.tsx              bento grid: quota cards, burn rate monitor, agents feed
-  components/          QuotaHealthCards, BurnRateMonitor, ActiveAgentsFeed
-  lib/                 pure helpers: quota, quota-cards, anomaly, burn-rate
+  App.tsx              bento grid: quota cards, burn rate monitor, circuit breaker controls, agents feed
+  components/          QuotaHealthCards, BurnRateMonitor, CircuitBreakerControls, ActiveAgentsFeed
+  lib/                 pure helpers (quota, quota-cards, anomaly, burn-rate, circuit-breaker) + control-api (ControlApi + in-memory mock)
   mock/                mockSnapshots, mockTurns (mock data until Phase 2 Realtime)
   hooks/useNow.ts      re-rendering clock used by the dashboard
 hooks/claude-code/     Claude Code hook: quota-ingest.sh + settings.example.json
@@ -48,9 +48,10 @@ scripts/               agent-room tooling (plan/handoff/verify)
 
 - **Quota health cards** (`components/QuotaHealthCards.tsx`) — per-provider label, usage percent, countdown and expiry.
 - **Burn Rate & Anomaly Monitor** (`components/BurnRateMonitor.tsx`) — TPM, time-to-limit for the OpenCode Go cycle (Claude shows `--`), and a red loop badge per agent detected by `detectLoops`.
+- **Circuit Breaker Controls** (`components/CircuitBreakerControls.tsx`) — RUNNING/PAUSED toggle plus warning and auto-pause thresholds (defaults 80 and 90). Thresholds are validated client-side with the same rule as `/api/control` (integers `1`–`100`, warning ≤ auto-pause). It talks to a `ControlApi`; for now `App.tsx` wires the in-memory `createMockControlApi()` from `lib/control-api.ts`, so no request hits `/api/control` yet.
 - **Active Agents Feed** (`components/ActiveAgentsFeed.tsx`) — the most recent turns (agent, model, task, tokens, cache ratio, age).
 
-The pure logic lives in `src/lib/` (`quota.ts`, `quota-cards.ts`, `anomaly.ts`, `burn-rate.ts`); every helper takes `now` as a parameter and is covered by Vitest.
+The pure logic lives in `src/lib/` (`quota.ts`, `quota-cards.ts`, `anomaly.ts`, `burn-rate.ts`, `circuit-breaker.ts`, `control-api.ts`); the quota/burn-rate helpers take `now` as a parameter, and the module is covered by Vitest.
 
 ## Environment variables
 
@@ -416,6 +417,6 @@ npx vitest run tests/api.test.ts   # run only the API spec
 
 ## Not implemented yet
 
-- **Phase 2 (PWA frontend):** the dashboard UI renders from mock data; Supabase Realtime subscriptions, live data, and service worker push registration are still pending (the `POST /api/subscribe` endpoint is already in place).
+- **Phase 2 (PWA frontend):** the dashboard UI renders from mock data; Supabase Realtime subscriptions, live data, and service worker push registration are still pending (the `POST /api/subscribe` endpoint is already in place). The Circuit Breaker Controls use the in-memory mock `ControlApi`, not `POST /api/control` yet.
 - **Phase 3 (host hooks):** the Claude Code hook (`hooks/claude-code/`) and the OpenCode Go plugin (`hooks/opencode/`) are implemented; install steps are in [macOS setup guide](#macos-setup-guide-phase-3d).
 - **Phase 3c:** circuit breaker / follow-up work on top of the host hooks.
