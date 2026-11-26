@@ -26,6 +26,12 @@ export interface OpencodeGoIngest extends IngestBase {
 
 export type IngestPayload = ClaudeCodeIngest | OpencodeGoIngest
 
+export interface OpencodeWindow {
+  id: '5h' | '7d' | '30d'
+  percent: number
+  reset_at: string
+}
+
 export interface QuotaSnapshot {
   provider: Provider
   window_5h_percent: number | null
@@ -34,6 +40,7 @@ export interface QuotaSnapshot {
   cycle_token_limit: number | null
   reset_at: string | null
   updated_at: string
+  opencode_windows?: OpencodeWindow[]
 }
 
 export interface Control {

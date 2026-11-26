@@ -22,6 +22,23 @@ export function mockSnapshots(now: number): QuotaSnapshot[] {
     cycle_token_limit: 10_000_000,
     reset_at: new Date(now + 5 * MS_PER_DAY).toISOString(),
     updated_at: new Date(now).toISOString(),
+    opencode_windows: [
+      {
+        id: '5h',
+        percent: 35,
+        reset_at: new Date(now + 3 * MS_PER_HOUR).toISOString(),
+      },
+      {
+        id: '7d',
+        percent: 58,
+        reset_at: new Date(now + 4 * MS_PER_DAY).toISOString(),
+      },
+      {
+        id: '30d',
+        percent: 82,
+        reset_at: new Date(now + 19 * MS_PER_DAY).toISOString(),
+      },
+    ],
   }
 
   return [claude, opencode]
