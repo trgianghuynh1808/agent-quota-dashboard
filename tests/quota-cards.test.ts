@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { QuotaSnapshot } from '../api/_lib/types.js'
-import { buildQuotaCards } from '../src/lib/quota-cards.js'
+import { buildQuotaCards, groupQuotaBars } from '../src/lib/quota-cards.js'
 
 const NOW = Date.parse('2026-01-01T00:00:00Z')
 const MS_HOUR = 3_600_000
@@ -106,5 +106,40 @@ describe('buildQuotaCards', () => {
     )
     expect(fallbackBars).toHaveLength(3)
     expect(fallbackBars[fallbackBars.length - 1].id).toBe('opencode-cycle')
+  })
+})
+
+describe('groupQuotaBars', () => {
+  it('T1: gom nhóm quota theo provider', () => {
+    const claude = claudeSnapshot(62, 91, isoAfter(2 * MS_HOUR))
+    const opencode: QuotaSnapshot = {
+      ...opencodeSnapshot(isoAfter(5 * MS_DAY)),
+      opencode_windows: [
+        { id: '5h', percent: 35, reset_at: isoAfter(3 * MS_HOUR) },
+        { id: '7d', percent: 85, reset_at: isoAfter(4 * MS_DAY) },
+        { id: '30d', percent: 95, reset_at: isoAfter(-1000) },
+      ],
+    }
+
+    const groups = groupQuotaBars(buildQuotaCards([claude, opencode], NOW))
+
+    expect(groups.map((group) => group.id)).toEqual(['claude', 'opencode'])
+    expect(groups[0].title).toBe('Claude Code')
+    expect(groups[0].bars.map((bar) => bar.id)).toEqual(['claude-5h', 'claude-7d'])
+    expect(groups[0].bars.map((bar) => bar.label)).toEqual(['5h', '7d'])
+    expect(groups[1].title).toBe('OpenCode Go')
+    expect(groups[1].bars.map((bar) => bar.id)).toEqual([
+      'opencode-5h',
+      'opencode-7d',
+      'opencode-30d',
+    ])
+    expect(groups[1].bars.map((bar) => bar.label)).toEqual(['5h', '7d', '30d'])
+
+    const claudeOnly = groupQuotaBars(buildQuotaCards([claude], NOW))
+
+    expect(claudeOnly.map((group) => group.id)).toEqual(['claude', 'opencode'])
+    expect(claudeOnly[0].bars.map((bar) => bar.id)).toEqual(['claude-5h', 'claude-7d'])
+    expect(claudeOnly[1].bars.map((bar) => bar.id)).toEqual(['opencode-cycle'])
+    expect(claudeOnly[1].bars[0].percent).toBeNull()
   })
 })

@@ -17,6 +17,34 @@ export type QuotaBar = {
   resetText: string
 }
 
+export type QuotaGroup = {
+  id: 'claude' | 'opencode'
+  title: string
+  bars: QuotaBar[]
+}
+
+export function groupQuotaBars(bars: QuotaBar[]): QuotaGroup[] {
+  const groups: QuotaGroup[] = [
+    { id: 'claude', title: 'Claude Code', bars: [] },
+    { id: 'opencode', title: 'OpenCode Go', bars: [] },
+  ]
+
+  for (const bar of bars) {
+    const group = bar.id.startsWith('claude-')
+      ? groups[0]
+      : bar.id.startsWith('opencode-')
+        ? groups[1]
+        : null
+    if (group === null) continue
+    const shortLabel = bar.label.includes(' · ')
+      ? bar.label.slice(bar.label.indexOf(' · ') + 3)
+      : bar.label
+    group.bars.push({ ...bar, label: shortLabel })
+  }
+
+  return groups.filter((group) => group.bars.length > 0)
+}
+
 function levelFor(percent: number | null): QuotaLevel {
   if (percent === null) return 'unknown'
   if (percent >= 90) return 'critical'

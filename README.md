@@ -49,7 +49,7 @@ scripts/               agent-room tooling (plan/handoff/verify)
 
 `npm run dev` serves a Bento grid fed by `src/mock/snapshots.ts` and `src/mock/turns.ts` (no Supabase/Realtime yet):
 
-- **Quota health cards** (`components/QuotaHealthCards.tsx`) — per-provider label, usage percent, countdown and expiry.
+- **Quota card** (`components/QuotaHealthCards.tsx`) — one grouped card with a section per provider (Claude Code, then OpenCode Go); each section lists its window rows with usage percent, progress bar and reset countdown (`groupQuotaBars` in `lib/quota-cards.ts`).
 - **Burn Rate & Anomaly Monitor** (`components/BurnRateMonitor.tsx`) — TPM, time-to-limit for the OpenCode Go cycle (Claude shows `--`), and a red loop badge per agent detected by `detectLoops`.
 - **Circuit Breaker Controls** (`components/CircuitBreakerControls.tsx`) — RUNNING/PAUSED toggle plus warning and auto-pause thresholds (defaults 80 and 90). Thresholds are validated client-side with the same rule as `/api/control` (integers `1`–`100`, warning ≤ auto-pause). It talks to a `ControlApi`; for now `App.tsx` wires the in-memory `createMockControlApi()` from `lib/control-api.ts`, so no request hits `/api/control` yet.
 - **Active Agents Feed** (`components/ActiveAgentsFeed.tsx`) — the most recent turns (agent, model, task, tokens, cache ratio, age).
