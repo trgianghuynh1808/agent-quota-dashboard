@@ -16,6 +16,7 @@ export interface ClaudeCodeIngest extends IngestBase {
   provider: 'claude_code'
   window_5h_percent: number
   window_7d_percent: number
+  reset_7d_at?: string
 }
 
 export interface OpencodeGoIngest extends IngestBase {
@@ -39,6 +40,7 @@ export interface QuotaSnapshot {
   cycle_tokens_used: number
   cycle_token_limit: number | null
   reset_at: string | null
+  reset_7d_at?: string | null
   updated_at: string
   opencode_windows?: OpencodeWindow[]
 }

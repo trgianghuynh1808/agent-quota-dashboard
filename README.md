@@ -39,7 +39,7 @@ src/
   mock/                mockSnapshots, mockTurns (used when the Supabase client env is missing)
   hooks/               useNow (re-rendering clock), useLiveData (fetch + Realtime state, mock fallback)
 hooks/claude-code/     Claude Code hook: quota-ingest.sh + settings.example.json
-supabase/migrations/   SQL migrations (0001_init.sql = Phase 1 schema, 0002_realtime_read_policies.sql = Realtime read policies)
+supabase/migrations/   SQL migrations (0001_init.sql = Phase 1 schema, 0002_realtime_read_policies.sql = Realtime read policies, 0003_claude_reset_7d.sql = Claude 7d reset column)
 tests/                 Vitest specs and the in-memory FakeDb
 docs/SPEC.md           product specification
 scripts/               agent-room tooling (plan/handoff/verify)
@@ -98,11 +98,11 @@ Apply the migrations with the Supabase CLI:
 supabase db push
 ```
 
-Or paste `supabase/migrations/0001_init.sql` followed by `supabase/migrations/0002_realtime_read_policies.sql` into the Supabase SQL editor.
+Or paste `supabase/migrations/0001_init.sql`, `0002_realtime_read_policies.sql` and `0003_claude_reset_7d.sql` into the Supabase SQL editor.
 
 It creates:
 
-- `quota_snapshots` — current quota per provider (`claude_code`, `opencode_go`).
+- `quota_snapshots` — current quota per provider (`claude_code`, `opencode_go`). `reset_at` is the 5h window reset (also used by OpenCode Go); `reset_7d_at` (added by `0003`) is the Claude 7d window reset.
 - `agent_telemetry_logs` — per-turn telemetry history, indexed by `created_at` and `(agent_id, created_at)`.
 - `orchestrator_control` — single row (`id = 1`) holding `global_status`, `auto_pause_threshold` (default 90) and `downgrade_model_threshold` (default 80).
 - `push_subscriptions` — Web Push subscriptions (extra table beyond the SPEC's three, needed for push).
@@ -131,6 +131,7 @@ Common fields:
 `claude_code` additional fields:
 
 - `window_5h_percent`, `window_7d_percent` — numbers `0..100` (required)
+- `reset_7d_at` — optional ISO date string for the 7d window reset (`reset_at` stays the 5h reset)
 
 `opencode_go` additional fields:
 
@@ -161,7 +162,8 @@ curl -X POST "$APP_URL/api/ingest" \
     "cache_read_tokens": 800,
     "window_5h_percent": 42.5,
     "window_7d_percent": 61.0,
-    "reset_at": "2026-11-26T03:00:00Z"
+    "reset_at": "2026-11-26T03:00:00Z",
+    "reset_7d_at": "2026-11-29T03:00:00Z"
   }'
 ```
 
@@ -200,6 +202,7 @@ Response (`200`):
       "cycle_tokens_used": 0,
       "cycle_token_limit": null,
       "reset_at": "2026-11-26T03:00:00Z",
+      "reset_7d_at": "2026-11-29T03:00:00Z",
       "updated_at": "2026-11-25T12:00:00Z"
     }
   ]
@@ -295,7 +298,7 @@ Send an initial snapshot once (for example after installing), passing the curren
 ~/.claude/hooks/quota-ingest.sh --once 12.5 40
 ```
 
-The payload maps `rate_limits.five_hour.used_percentage` → `window_5h_percent`, `rate_limits.seven_day.used_percentage` → `window_7d_percent`, `model.id` → `model`, `session_id` → `task_name`, and `rate_limits.five_hour.resets_at` (epoch seconds) → `reset_at` (ISO). The statusline JSON shape (`rate_limits.*`) is the currently known format; adjust the `jq` filter in the script if your Claude Code version differs.
+The payload maps `rate_limits.five_hour.used_percentage` → `window_5h_percent`, `rate_limits.seven_day.used_percentage` → `window_7d_percent`, `model.id` → `model`, `session_id` → `task_name`, `rate_limits.five_hour.resets_at` (epoch seconds) → `reset_at` (ISO) and `rate_limits.seven_day.resets_at` (epoch seconds) → `reset_7d_at` (ISO, omitted when absent). The statusline JSON shape (`rate_limits.*`) is the currently known format; adjust the `jq` filter in the script if your Claude Code version differs.
 
 ## OpenCode Go plugin
 
@@ -348,7 +351,7 @@ supabase link --project-ref <your-project-ref>
 supabase db push
 ```
 
-This applies `supabase/migrations/0001_init.sql` and `0002_realtime_read_policies.sql` (see [Database](#database)). Copy the project URL and the **service role** key from Project Settings → API; they become `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+This applies `supabase/migrations/0001_init.sql`, `0002_realtime_read_policies.sql` and `0003_claude_reset_7d.sql` (see [Database](#database)). Copy the project URL and the **service role** key from Project Settings → API; they become `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 
 ### 3. Deploy to Vercel and set environment variables
 

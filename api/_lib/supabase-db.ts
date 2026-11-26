@@ -31,6 +31,7 @@ function toSnapshot(row: Record<string, unknown>): QuotaSnapshot {
     cycle_tokens_used: Number(row.cycle_tokens_used ?? 0),
     cycle_token_limit: row.cycle_token_limit == null ? null : Number(row.cycle_token_limit),
     reset_at: row.reset_at == null ? null : String(row.reset_at),
+    reset_7d_at: row.reset_7d_at == null ? null : String(row.reset_7d_at),
     updated_at: row.updated_at == null ? new Date().toISOString() : String(row.updated_at),
   }
 }
@@ -61,6 +62,7 @@ export function createSupabaseDb(): Db {
           window_5h_percent: payload.window_5h_percent,
           window_7d_percent: payload.window_7d_percent,
           reset_at: payload.reset_at ?? null,
+          reset_7d_at: payload.reset_7d_at ?? null,
           updated_at: new Date().toISOString(),
         })
         .select()

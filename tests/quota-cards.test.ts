@@ -14,6 +14,7 @@ function claudeSnapshot(
   window5h: number,
   window7d: number,
   resetAt: string,
+  reset7dAt?: string,
 ): QuotaSnapshot {
   return {
     provider: 'claude_code',
@@ -22,6 +23,7 @@ function claudeSnapshot(
     cycle_tokens_used: 0,
     cycle_token_limit: null,
     reset_at: resetAt,
+    ...(reset7dAt !== undefined ? { reset_7d_at: reset7dAt } : {}),
     updated_at: new Date(NOW).toISOString(),
   }
 }
@@ -57,7 +59,7 @@ describe('buildQuotaCards', () => {
   })
 
   it('T2: quá reset_at hiển thị 0% và snapshot thiếu là unknown', () => {
-    const claude = claudeSnapshot(95, 85, isoAfter(-1000))
+    const claude = claudeSnapshot(95, 85, isoAfter(-1000), isoAfter(-1000))
 
     const bars = buildQuotaCards([claude], NOW)
 
@@ -72,6 +74,17 @@ describe('buildQuotaCards', () => {
     const notExpired = claudeSnapshot(62, 85, isoAfter(MS_HOUR))
     const futureBars = buildQuotaCards([notExpired], NOW)
     expect(futureBars[1].level).toBe('warn')
+  })
+
+  it('T4: dùng reset_7d_at riêng cho hàng 7d, thiếu thì "--"', () => {
+    const claude = claudeSnapshot(30, 45, isoAfter(2 * MS_HOUR), isoAfter(5 * MS_DAY))
+    const bars = buildQuotaCards([claude], NOW)
+    expect(bars[0].resetText).toBe('2h 00m')
+    expect(bars[1].resetText).toBe('5d 00h')
+
+    const without7d = claudeSnapshot(30, 45, isoAfter(2 * MS_HOUR))
+    const noResetBars = buildQuotaCards([without7d], NOW)
+    expect(noResetBars[1].resetText).toBe('--')
   })
 
   it('T1: OpenCode Go 3 mốc — percent/level/reset riêng, quá reset về 0%, thiếu windows thì fallback', () => {

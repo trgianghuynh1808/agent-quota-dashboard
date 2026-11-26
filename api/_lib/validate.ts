@@ -152,11 +152,20 @@ export function parseIngestPayload(body: unknown): ParseResult {
       return { ok: false, error: 'window_5h_percent and window_7d_percent must be numbers between 0 and 100' }
     }
 
+    let reset7dAt: string | undefined
+    if (data.reset_7d_at !== undefined) {
+      if (typeof data.reset_7d_at !== 'string' || Number.isNaN(Date.parse(data.reset_7d_at))) {
+        return { ok: false, error: 'reset_7d_at must be an ISO date string' }
+      }
+      reset7dAt = data.reset_7d_at
+    }
+
     const value: ClaudeCodeIngest = {
       ...base,
       provider: 'claude_code',
       window_5h_percent: window5h,
       window_7d_percent: window7d,
+      ...(reset7dAt !== undefined ? { reset_7d_at: reset7dAt } : {}),
     }
     return { ok: true, value }
   }

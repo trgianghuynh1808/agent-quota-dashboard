@@ -73,7 +73,7 @@ export function buildQuotaCards(snapshots: QuotaSnapshot[], now: number): QuotaB
   )
   const claude7d = effectivePercent(
     claude?.window_7d_percent ?? null,
-    claude?.reset_at ?? null,
+    claude?.reset_7d_at ?? null,
     now,
   )
 
@@ -90,7 +90,7 @@ export function buildQuotaCards(snapshots: QuotaSnapshot[], now: number): QuotaB
       label: 'Claude Code · 7d',
       percent: claude7d,
       level: levelFor(claude7d),
-      resetText: claude ? resetText(claude.reset_at, now) : '--',
+      resetText: claude ? resetText(claude.reset_7d_at ?? null, now) : '--',
     },
   ]
 

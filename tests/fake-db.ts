@@ -41,6 +41,7 @@ export class FakeDb implements Db {
       cycle_tokens_used: previous?.cycle_tokens_used ?? 0,
       cycle_token_limit: previous?.cycle_token_limit ?? null,
       reset_at: payload.reset_at ?? null,
+      reset_7d_at: payload.reset_7d_at ?? null,
       updated_at: new Date().toISOString(),
     }
     this.snapshots.set('claude_code', snapshot)

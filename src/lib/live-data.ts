@@ -21,6 +21,7 @@ export interface SnapshotRow {
   cycle_tokens_used: number | string | null
   cycle_token_limit: number | string | null
   reset_at: string | null
+  reset_7d_at?: string | null
   updated_at: string | null
 }
 
@@ -77,6 +78,7 @@ export function rowToSnapshot(row: SnapshotRow): QuotaSnapshot {
     cycle_tokens_used: toNumber(row.cycle_tokens_used),
     cycle_token_limit: toNumberOrNull(row.cycle_token_limit),
     reset_at: toTextOrNull(row.reset_at),
+    reset_7d_at: toTextOrNull(row.reset_7d_at),
     updated_at: toText(row.updated_at),
   }
 }

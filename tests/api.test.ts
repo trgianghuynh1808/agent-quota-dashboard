@@ -193,6 +193,47 @@ describe('T2: ingest updates snapshots', () => {
   })
 })
 
+describe('T4: claude reset_7d_at', () => {
+  it('persists reset_7d_at and rejects a non-ISO value', async () => {
+    const db = new FakeDb()
+    const notify = vi.fn<Notify>().mockResolvedValue(undefined)
+    const ingest = makeIngest(db, notify)
+    const reset5h = new Date(1790000000 * 1000).toISOString()
+    const reset7d = new Date(1790500000 * 1000).toISOString()
+
+    const ok = await call(ingest, {
+      headers: AUTH,
+      body: {
+        provider: 'claude_code',
+        agent_id: 'a1',
+        window_5h_percent: 12.5,
+        window_7d_percent: 40,
+        reset_at: reset5h,
+        reset_7d_at: reset7d,
+      },
+    })
+    expect(ok.statusCode).toBe(200)
+
+    const claude = findByProvider(await db.listSnapshots(), 'claude_code')
+    expect(claude?.reset_at).toBe(reset5h)
+    expect(claude?.reset_7d_at).toBe(reset7d)
+
+    const bad = await call(ingest, {
+      headers: AUTH,
+      body: {
+        provider: 'claude_code',
+        agent_id: 'a1',
+        window_5h_percent: 12.5,
+        window_7d_percent: 40,
+        reset_7d_at: 'abc',
+      },
+    })
+    expect(bad.statusCode).toBe(400)
+    const claudeAfter = findByProvider(await db.listSnapshots(), 'claude_code')
+    expect(claudeAfter?.reset_7d_at).toBe(reset7d)
+  })
+})
+
 describe('POST /api/control', () => {
   it('T1: applies partial updates and keeps fields not sent', async () => {
     const db = new FakeDb()
