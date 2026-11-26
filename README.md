@@ -19,6 +19,7 @@ api/
   ingest.ts            POST /api/ingest handler
   status.ts            GET /api/status handler
   control.ts           POST /api/control handler (toggle pause + thresholds)
+  subscribe.ts         POST /api/subscribe handler (store Web Push subscription)
   _lib/
     auth.ts            Bearer token check (timingSafeEqual)
     ingest.ts          processIngest: snapshot update + auto-pause logic
@@ -27,7 +28,7 @@ api/
     types.ts           shared types and the Db/notify interfaces
     validate.ts        manual payload validation
 src/                   placeholder React app (Phase 1)
-supabase/migrations/   SQL migrations (0001_init.sql = Phase 1 schema)
+supabase/migrations/   SQL migrations (0001_init.sql = Phase 1 schema, 0002_realtime_read_policies.sql = Realtime read policies)
 tests/                 Vitest specs and the in-memory FakeDb
 docs/SPEC.md           product specification
 scripts/               agent-room tooling (plan/handoff/verify)
@@ -39,7 +40,7 @@ Copy `.env.example` to `.env` and fill in real values. All of these are **server
 
 | Variable | Purpose |
 | --- | --- |
-| `INGEST_API_KEY` | Bearer token required by `POST /api/ingest`, `GET /api/status` and `POST /api/control`. |
+| `INGEST_API_KEY` | Bearer token required by `POST /api/ingest`, `GET /api/status`, `POST /api/control` and `POST /api/subscribe`. |
 | `SUPABASE_URL` | Supabase project URL. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key used by the API routes (bypasses RLS). |
 | `VAPID_PUBLIC_KEY` | Web Push public key. |
@@ -50,13 +51,13 @@ Variables are read inside functions (`getEnv()`/factories), not at module import
 
 ## Database
 
-Apply the migration with the Supabase CLI:
+Apply the migrations with the Supabase CLI:
 
 ```bash
 supabase db push
 ```
 
-Or paste `supabase/migrations/0001_init.sql` into the Supabase SQL editor.
+Or paste `supabase/migrations/0001_init.sql` followed by `supabase/migrations/0002_realtime_read_policies.sql` into the Supabase SQL editor.
 
 It creates:
 
@@ -66,7 +67,7 @@ It creates:
 - `push_subscriptions` — Web Push subscriptions (extra table beyond the SPEC's three, needed for push).
 - Function `increment_opencode_usage(delta, p_limit, p_reset_at)` for atomic token increments.
 
-RLS is enabled on all four tables with **no policies**: only the service role (the API routes) can read or write them. `quota_snapshots`, `agent_telemetry_logs` and `orchestrator_control` are added to the `supabase_realtime` publication for Phase 2.
+RLS is enabled on all four tables. `0001` creates no policies, so only the service role (the API routes) can read or write them; `0002` adds `select` policies for `anon` and `authenticated` on `quota_snapshots`, `agent_telemetry_logs` and `orchestrator_control` so the PWA can read them over Realtime, while `push_subscriptions` stays locked to the service role. All three of those data tables are added to the `supabase_realtime` publication for Phase 2.
 
 ## API
 
@@ -193,6 +194,37 @@ Errors:
 - `405` — method other than `POST`.
 - `500` — database failure.
 
+### `POST /api/subscribe`
+
+Stores a Web Push subscription for Phase 2, upserting on `endpoint` (re-registering the same endpoint overwrites it, no duplicate rows). The body must be:
+
+- `endpoint` — an `https://` URL (required)
+- `keys.p256dh` — non-empty string (required)
+- `keys.auth` — non-empty string (required)
+
+```bash
+curl -X POST "$APP_URL/api/subscribe" \
+  -H "Authorization: Bearer $INGEST_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "endpoint": "https://push.example/abc",
+    "keys": { "p256dh": "...", "auth": "..." }
+  }'
+```
+
+Response (`200`):
+
+```json
+{ "ok": true }
+```
+
+Errors:
+
+- `400` — invalid body (missing `endpoint`/`keys`, `endpoint` not `https://`, or empty `p256dh`/`auth`).
+- `401` — missing or wrong bearer token.
+- `405` — method other than `POST`.
+- `500` — database failure.
+
 ## Commands
 
 ```bash
@@ -206,5 +238,5 @@ npx vitest run tests/api.test.ts   # run only the API spec
 
 ## Not implemented yet
 
-- **Phase 2 (PWA frontend):** dashboard UI, Supabase Realtime subscriptions, service worker push registration, and the subscription endpoint.
+- **Phase 2 (PWA frontend):** dashboard UI, Supabase Realtime subscriptions, and service worker push registration (the `POST /api/subscribe` endpoint is already in place).
 - **Phase 3 (host hooks):** Claude Code `Stop`/`Statusline` hook config, the OpenCode Go global plugin with one-time backfill, and the macOS setup guide.

@@ -54,8 +54,15 @@ export interface LogEntry {
   cache_read_tokens: number
 }
 
+export interface PushSubscriptionInput {
+  endpoint: string
+  p256dh: string
+  auth: string
+}
+
 export interface Db {
   insertLog(entry: LogEntry): Promise<void>
+  upsertPushSubscription(sub: PushSubscriptionInput): Promise<void>
   upsertClaudeSnapshot(payload: ClaudeCodeIngest): Promise<QuotaSnapshot>
   incrementOpencode(
     deltaTokens: number,

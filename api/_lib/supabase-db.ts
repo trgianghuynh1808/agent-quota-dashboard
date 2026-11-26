@@ -5,6 +5,7 @@ import type {
   ControlPatch,
   Db,
   LogEntry,
+  PushSubscriptionInput,
   QuotaSnapshot,
 } from './types.js'
 
@@ -129,6 +130,16 @@ export function createSupabaseDb(): Db {
         .order('provider', { ascending: true })
       if (error) throw new Error(`listSnapshots failed: ${error.message}`)
       return ((data ?? []) as Record<string, unknown>[]).map(toSnapshot)
+    },
+
+    async upsertPushSubscription(sub: PushSubscriptionInput): Promise<void> {
+      const { error } = await client
+        .from('push_subscriptions')
+        .upsert(
+          { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+          { onConflict: 'endpoint' },
+        )
+      if (error) throw new Error(`upsertPushSubscription failed: ${error.message}`)
     },
   }
 }

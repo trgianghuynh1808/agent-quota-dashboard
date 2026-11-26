@@ -5,6 +5,7 @@ import type {
   Db,
   LogEntry,
   Provider,
+  PushSubscriptionInput,
   QuotaSnapshot,
 } from '../api/_lib/types.js'
 
@@ -15,6 +16,7 @@ export interface FakeDbOptions {
 export class FakeDb implements Db {
   readonly logs: LogEntry[] = []
   readonly control: Control
+  readonly subscriptions = new Map<string, PushSubscriptionInput>()
   private readonly snapshots = new Map<Provider, QuotaSnapshot>()
 
   constructor(options: FakeDbOptions = {}) {
@@ -80,5 +82,9 @@ export class FakeDb implements Db {
 
   async listSnapshots(): Promise<QuotaSnapshot[]> {
     return Array.from(this.snapshots.values())
+  }
+
+  async upsertPushSubscription(sub: PushSubscriptionInput): Promise<void> {
+    this.subscriptions.set(sub.endpoint, { ...sub })
   }
 }

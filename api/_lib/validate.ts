@@ -1,4 +1,10 @@
-import type { ClaudeCodeIngest, ControlPatch, IngestPayload, OpencodeGoIngest } from './types.js'
+import type {
+  ClaudeCodeIngest,
+  ControlPatch,
+  IngestPayload,
+  OpencodeGoIngest,
+  PushSubscriptionInput,
+} from './types.js'
 
 export type ParseResult =
   | { ok: true; value: IngestPayload }
@@ -6,6 +12,10 @@ export type ParseResult =
 
 export type ControlPatchResult =
   | { ok: true; value: ControlPatch }
+  | { ok: false; error: string }
+
+export type SubscriptionResult =
+  | { ok: true; value: PushSubscriptionInput }
   | { ok: false; error: string }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -172,4 +182,39 @@ export function parseIngestPayload(body: unknown): ParseResult {
     ...(cycleTokenLimit !== undefined ? { cycle_token_limit: cycleTokenLimit } : {}),
   }
   return { ok: true, value }
+}
+
+export function parseSubscription(body: unknown): SubscriptionResult {
+  let data = body
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data)
+    } catch {
+      return { ok: false, error: 'Body must be valid JSON' }
+    }
+  }
+  if (!isRecord(data)) return { ok: false, error: 'Body must be a JSON object' }
+
+  if (typeof data.endpoint !== 'string' || !data.endpoint.startsWith('https://')) {
+    return { ok: false, error: 'endpoint must be an https:// URL' }
+  }
+
+  if (!isRecord(data.keys)) return { ok: false, error: 'keys must be an object' }
+
+  if (!isNonEmptyString(data.keys.p256dh)) {
+    return { ok: false, error: 'keys.p256dh is required' }
+  }
+
+  if (!isNonEmptyString(data.keys.auth)) {
+    return { ok: false, error: 'keys.auth is required' }
+  }
+
+  return {
+    ok: true,
+    value: {
+      endpoint: data.endpoint,
+      p256dh: data.keys.p256dh,
+      auth: data.keys.auth,
+    },
+  }
 }
