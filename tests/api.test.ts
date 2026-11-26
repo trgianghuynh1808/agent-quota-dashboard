@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createIngestHandler } from '../api/ingest.js'
 import type { Notify } from '../api/_lib/ingest.js'
 import type { QuotaSnapshot } from '../api/_lib/types.js'
+import { createControlHandler } from '../api/control.js'
 import { createStatusHandler } from '../api/status.js'
 import { FakeDb } from './fake-db.js'
 
@@ -16,6 +17,12 @@ interface CallOptions {
 }
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void>
+
+interface ControlBody {
+  global_status: string
+  auto_pause_threshold: number
+  downgrade_model_threshold: number
+}
 
 function createRes() {
   const res = {
@@ -54,6 +61,10 @@ function makeIngest(db: FakeDb, notify: Notify) {
 
 function makeStatus(db: FakeDb) {
   return createStatusHandler({ db, apiKey: API_KEY })
+}
+
+function makeControl(db: FakeDb) {
+  return createControlHandler({ db, apiKey: API_KEY })
 }
 
 function findByProvider(snapshots: QuotaSnapshot[], provider: string) {
@@ -174,6 +185,98 @@ describe('T2: ingest updates snapshots', () => {
     expect(db.logs[0].input_tokens).toBe(10)
     expect(db.logs[0].cache_read_tokens).toBe(3)
     expect(notify).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/control', () => {
+  it('T1: applies partial updates and keeps fields not sent', async () => {
+    const db = new FakeDb()
+    const control = makeControl(db)
+    const status = makeStatus(db)
+
+    const pause = await call(control, { headers: AUTH, body: { global_status: 'paused' } })
+    expect(pause.statusCode).toBe(200)
+    const pauseBody = pause.body as {
+      ok: boolean
+      global_status: string
+      auto_pause_threshold: number
+      downgrade_model_threshold: number
+    }
+    expect(pauseBody.ok).toBe(true)
+    expect(pauseBody.global_status).toBe('paused')
+    expect(pauseBody.auto_pause_threshold).toBe(90)
+    expect(pauseBody.downgrade_model_threshold).toBe(80)
+
+    const thresholds = await call(control, {
+      headers: AUTH,
+      body: { auto_pause_threshold: 95, downgrade_model_threshold: 85 },
+    })
+    expect(thresholds.statusCode).toBe(200)
+    const thresholdsBody = thresholds.body as {
+      global_status: string
+      auto_pause_threshold: number
+      downgrade_model_threshold: number
+    }
+    expect(thresholdsBody.global_status).toBe('paused')
+    expect(thresholdsBody.auto_pause_threshold).toBe(95)
+    expect(thresholdsBody.downgrade_model_threshold).toBe(85)
+
+    const statusRes = await call(status, { method: 'GET', headers: AUTH })
+    expect(statusRes.statusCode).toBe(200)
+    const statusBody = statusRes.body as ControlBody
+    expect(statusBody.global_status).toBe(db.control.global_status)
+    expect(statusBody.auto_pause_threshold).toBe(db.control.auto_pause_threshold)
+    expect(statusBody.downgrade_model_threshold).toBe(db.control.downgrade_model_threshold)
+  })
+
+  it('T2: rejects bad auth and method without changing the db', async () => {
+    const db = new FakeDb()
+    const control = makeControl(db)
+
+    const missingAuth = await call(control, { body: { global_status: 'paused' } })
+    expect(missingAuth.statusCode).toBe(401)
+
+    const wrongAuth = await call(control, {
+      headers: { authorization: 'Bearer wrong' },
+      body: { global_status: 'paused' },
+    })
+    expect(wrongAuth.statusCode).toBe(401)
+
+    const wrongMethod = await call(control, { method: 'GET', headers: AUTH })
+    expect(wrongMethod.statusCode).toBe(405)
+
+    expect(db.control.global_status).toBe('running')
+  })
+
+  it('T3: rejects invalid bodies without writing', async () => {
+    const db = new FakeDb()
+    const control = makeControl(db)
+
+    const empty = await call(control, { headers: AUTH, body: {} })
+    expect(empty.statusCode).toBe(400)
+    expect(typeof (empty.body as { error: unknown }).error).toBe('string')
+
+    const badStatus = await call(control, { headers: AUTH, body: { global_status: 'stopped' } })
+    expect(badStatus.statusCode).toBe(400)
+    expect(typeof (badStatus.body as { error: unknown }).error).toBe('string')
+
+    const badThreshold = await call(control, {
+      headers: AUTH,
+      body: { auto_pause_threshold: 150 },
+    })
+    expect(badThreshold.statusCode).toBe(400)
+    expect(typeof (badThreshold.body as { error: unknown }).error).toBe('string')
+
+    const crossed = await call(control, {
+      headers: AUTH,
+      body: { auto_pause_threshold: 70 },
+    })
+    expect(crossed.statusCode).toBe(400)
+    expect(typeof (crossed.body as { error: unknown }).error).toBe('string')
+
+    expect(db.control.global_status).toBe('running')
+    expect(db.control.auto_pause_threshold).toBe(90)
+    expect(db.control.downgrade_model_threshold).toBe(80)
   })
 })
 

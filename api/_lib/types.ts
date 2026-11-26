@@ -42,6 +42,8 @@ export interface Control {
   downgrade_model_threshold: number
 }
 
+export type ControlPatch = Partial<Control>
+
 export interface LogEntry {
   provider: Provider
   agent_id: string
@@ -62,5 +64,6 @@ export interface Db {
   ): Promise<QuotaSnapshot>
   getControl(): Promise<Control>
   setPaused(): Promise<void>
+  updateControl(patch: ControlPatch): Promise<Control>
   listSnapshots(): Promise<QuotaSnapshot[]>
 }
