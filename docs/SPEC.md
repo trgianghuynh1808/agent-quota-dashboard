@@ -39,7 +39,9 @@ Stores the real-time quota state for each provider.
 - `window_7d_percent` (float): Current 7-day rolling window usage % (Claude Code).
 - `cycle_tokens_used` (bigint): Total tokens used in current cycle (OpenCode Go).
 - `cycle_token_limit` (bigint): Legacy cycle limit column; kept in the schema but no longer set or used (the dashboard no longer computes a cycle percentage).
-- `reset_at` (timestamptz): Next quota reset timestamp.
+- `reset_at` (timestamptz): Next quota reset timestamp — the Claude Code 5h window reset (OpenCode Go still uses it for token-delta payloads and window resets).
+- `reset_7d_at` (timestamptz): Claude Code 7d window reset, separate from `reset_at` (added by `0003_claude_reset_7d.sql`).
+- `opencode_windows` (jsonb): The real OpenCode Go quota windows `[{ id: '5h' | '7d' | '30d', percent, reset_at }]` typed from the console (added by `0004_opencode_windows.sql`); a window ingest upserts its entry by `id`, leaving the other windows untouched.
 - `updated_at` (timestamptz): Last sync timestamp.
 
 ### B. `agent_telemetry_logs` (Event History & Burn Rate)
@@ -71,10 +73,16 @@ The `0001` table also has `auto_pause_threshold` and `downgrade_model_threshold`
 ### A. Ingest Endpoint (`POST /api/ingest`)
 **Auth:** Bearer Token (`INGEST_API_KEY`).
 
+**Payload fields:**
+- Common: `provider`, `agent_id` (required); optional `task_name`, `model`, `input_tokens`/`output_tokens`/`cache_read_tokens` (non-negative integers, default `0`) and `reset_at` (ISO date string).
+- `claude_code`: requires `window_5h_percent` and `window_7d_percent` (numbers `0..100`); optional `reset_7d_at` (ISO date string for the 7d window reset; `reset_at` stays the 5h reset).
+- `opencode_go` token delta: requires `delta_tokens` (non-negative integer).
+- `opencode_go` quota window: `window_id` (`5h` | `7d` | `30d`) with `window_percent` (`0..100`) and `reset_at` — both required when `window_id` is set.
+
 **Behavior:**
 1. Validates payload and inserts into `agent_telemetry_logs`.
-2. For `claude_code`: Performs an UPSERT on `quota_snapshots` overwriting `window_5h_percent`, `window_7d_percent`, and `reset_at` with the exact absolute percentages reported by Claude's hook/statusline payload.
-3. For `opencode_go`: Performs an atomic increment (`cycle_tokens_used = cycle_tokens_used + delta_tokens`) on `quota_snapshots`.
+2. For `claude_code`: Performs an UPSERT on `quota_snapshots` overwriting `window_5h_percent`, `window_7d_percent`, `reset_at` and (when present) `reset_7d_at` with the exact absolute values reported by Claude's hook/statusline payload.
+3. For `opencode_go`: Performs an atomic increment (`cycle_tokens_used = cycle_tokens_used + delta_tokens`) on `quota_snapshots` — unless `window_id` is set, in which case it only upserts that window in `opencode_windows` (merged by `id`) and inserts no telemetry log and no token delta.
 4. **No threshold check:** ingest never compares quota percentages against a threshold, never changes `orchestrator_control` and never sends a notification. Pausing is manual through `POST /api/control` with `{ global_status }`, and the response only carries `{ ok: true, global_status }`.
 
 ### B. Host-Side Integration Scripts (To be generated in `/scripts` or `/hooks`)
@@ -87,6 +95,10 @@ The `0001` table also has `auto_pause_threshold` and `downgrade_model_threshold`
 - Create a lightweight global plugin hooking into `message.updated` for completed assistant messages.
 - Use non-blocking `fetch()` (fire-and-forget with short timeout) to push one token delta per message.
 - Do not read the local OpenCode DB, do not backfill past usage and do not send a cycle token limit.
+
+**OpenCode Go quota windows (`hooks/opencode/set-quota.sh`):**
+- The plugin cannot read the OpenCode Go console windows, so `set-quota.sh <5h|7d|30d> <percent> <reset_iso>` posts one real window (`window_id`/`window_percent`/`reset_at`, synchronous `curl`) to `/api/ingest`.
+- The dashboard always renders the three OpenCode Go rows (5h/7d/30d) from `quota_snapshots.opencode_windows`; a window not entered yet shows `--`.
 
 **Circuit Breaker Pre-Check (`GET /api/status`):**
 - Provide a lightweight `PreToolUse` / `UserPromptSubmit` hook snippet that checks `global_status`. If 'paused', exits with a non-zero code or sleep loop instructing the agent to halt until resumed.

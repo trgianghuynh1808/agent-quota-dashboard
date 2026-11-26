@@ -20,7 +20,7 @@ api/
   control.ts           POST /api/control handler (manual pause/resume)
   _lib/
     auth.ts            Bearer token check (timingSafeEqual)
-    ingest.ts          processIngest: snapshot/log update, returns global_status
+    ingest.ts          processIngest: snapshot/log/window update, returns global_status
     supabase-db.ts     Db implementation using the service role key
     types.ts           shared types and the Db interface
     validate.ts        manual payload validation
@@ -212,6 +212,21 @@ Response (`200`):
       "reset_at": "2026-11-26T03:00:00Z",
       "reset_7d_at": "2026-11-29T03:00:00Z",
       "updated_at": "2026-11-25T12:00:00Z"
+    },
+    {
+      "provider": "opencode_go",
+      "window_5h_percent": null,
+      "window_7d_percent": null,
+      "cycle_tokens_used": 53200,
+      "cycle_token_limit": null,
+      "reset_at": null,
+      "reset_7d_at": null,
+      "opencode_windows": [
+        { "id": "5h", "percent": 35, "reset_at": "2026-11-26T03:00:00Z" },
+        { "id": "7d", "percent": 58, "reset_at": "2026-12-01T00:00:00Z" },
+        { "id": "30d", "percent": 41, "reset_at": "2026-12-25T00:00:00Z" }
+      ],
+      "updated_at": "2026-11-25T12:00:00Z"
     }
   ]
 }
@@ -219,7 +234,7 @@ Response (`200`):
 
 ### `POST /api/control`
 
-Update the single `orchestrator_control` row. The only accepted field is `global_status` (`running` | `paused`); it is required. This is the manual pause/resume switch used by `hooks/claude-code/circuit-breaker.sh`.
+Update the single `orchestrator_control` row. The only accepted field is `global_status` (`running` | `paused`); it is required. This is the manual pause/resume switch that `hooks/claude-code/circuit-breaker.sh` enforces on the host (the hook itself only reads `GET /api/status`).
 
 ```bash
 curl -X POST "$APP_URL/api/control" \
@@ -442,5 +457,4 @@ npx vitest run tests/api.test.ts   # run only the API spec
 
 - **Phase 2 (PWA frontend):** the dashboard reads live quota/telemetry/control from Supabase (initial fetch + Realtime) when `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are set, otherwise it renders mock data. Still pending: dashboard control writes (`POST /api/control` — the Circuit Breaker toggle is read-only in live mode and errors with "Chưa nối /api/control").
 - **Phase 3 (host hooks):** the Claude Code hooks (`hooks/claude-code/`) and the OpenCode Go plugin (`hooks/opencode/`) are implemented; install steps are in [macOS setup guide](#macos-setup-guide-phase-3d).
-- **Phase 3c:** circuit breaker / follow-up work on top of the host hooks.
 - Out of scope by design: automatic threshold-based pause, Web Push notifications and their subscription endpoint, and cycle-limit based estimates. Pausing is manual only.
