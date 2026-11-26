@@ -35,3 +35,12 @@ export function createMockControlApi(
     },
   }
 }
+
+export function createReadOnlyControlApi(getControl: () => Promise<Control>): ControlApi {
+  return {
+    getControl,
+    async updateControl(): Promise<Control> {
+      throw new Error('Chưa nối /api/control')
+    },
+  }
+}

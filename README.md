@@ -2,11 +2,11 @@
 
 Unified multi-agent quota & telemetry dashboard for **Claude Code** and **OpenCode Go** (see `docs/SPEC.md`).
 
-This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status/control/subscribe, threshold-based auto-pause and Web Push notifications, **Phase 3a**: a sample Claude Code hook that feeds `/api/ingest`, and **Phase 3b**: the OpenCode Go global plugin (`hooks/opencode/quota-sync.ts`) with a one-time usage backfill. **Phase 2** is partially built: the dashboard renders from mock data (quota health cards, Burn Rate & Anomaly Monitor, Active Agents Feed, remote Circuit Breaker controls over a mock control API) and the PWA shell is configured (standalone manifest, dark theme color, service worker handling `push`/`notificationclick`, plus an iOS/Safari onboarding banner that asks for notification permission only once the app is installed and the user clicks "Bật thông báo"); Supabase Realtime wiring and push subscription registration are still pending. This README ships a [macOS setup guide](#macos-setup-guide-phase-3d).
+This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status/control/subscribe, threshold-based auto-pause and Web Push notifications, **Phase 3a**: a sample Claude Code hook that feeds `/api/ingest`, and **Phase 3b**: the OpenCode Go global plugin (`hooks/opencode/quota-sync.ts`) with a one-time usage backfill. **Phase 2** is partially built: the dashboard reads live quota, telemetry and control from Supabase (initial fetch + Realtime) when `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set, and otherwise renders mock data (quota health cards, Burn Rate & Anomaly Monitor, Active Agents Feed); the PWA shell is configured (standalone manifest, dark theme color, service worker handling `push`/`notificationclick`, plus an iOS/Safari onboarding banner that asks for notification permission only once the app is installed and the user clicks "Bật thông báo"). Dashboard control writes (`POST /api/control`) and push subscription registration are still pending. This README ships a [macOS setup guide](#macos-setup-guide-phase-3d).
 
 ## Stack
 
-- **Frontend:** Vite + React 19 + TypeScript + Tailwind CSS v4 + vite-plugin-pwa; the dashboard currently renders from mock data (Phase 2 Realtime wiring pending).
+- **Frontend:** Vite + React 19 + TypeScript + Tailwind CSS v4 + vite-plugin-pwa; the dashboard reads live data from Supabase (initial fetch + Realtime) when the client env vars are set, and falls back to mock data otherwise.
 - **Backend:** Vercel Node API routes in `api/`.
 - **Database:** Supabase Postgres + Realtime.
 - **Notifications:** Web Push with VAPID keys (`web-push`).
@@ -35,9 +35,9 @@ public/
 src/
   App.tsx              bento grid: push onboarding banner, quota cards, burn rate monitor, circuit breaker controls, agents feed
   components/          PushOnboardingBanner, QuotaHealthCards, BurnRateMonitor, CircuitBreakerControls, ActiveAgentsFeed
-  lib/                 pure helpers (quota, quota-cards, anomaly, burn-rate, circuit-breaker, push-onboarding) + control-api (ControlApi + in-memory mock)
-  mock/                mockSnapshots, mockTurns (mock data until Phase 2 Realtime)
-  hooks/useNow.ts      re-rendering clock used by the dashboard
+  lib/                 pure helpers (quota, quota-cards, anomaly, burn-rate, circuit-breaker, push-onboarding), live-data (LiveSource + row mappers/reducers + startLive), supabase-source (Supabase LiveSource), control-api (ControlApi + mock/read-only)
+  mock/                mockSnapshots, mockTurns (used when the Supabase client env is missing)
+  hooks/               useNow (re-rendering clock), useLiveData (fetch + Realtime state, mock fallback)
 hooks/claude-code/     Claude Code hook: quota-ingest.sh + settings.example.json
 supabase/migrations/   SQL migrations (0001_init.sql = Phase 1 schema, 0002_realtime_read_policies.sql = Realtime read policies)
 tests/                 Vitest specs and the in-memory FakeDb
@@ -45,17 +45,17 @@ docs/SPEC.md           product specification
 scripts/               agent-room tooling (plan/handoff/verify)
 ```
 
-## Dashboard (Phase 2, mock data)
+## Dashboard (Phase 2, live or mock data)
 
-`npm run dev` serves a Bento grid fed by `src/mock/snapshots.ts` and `src/mock/turns.ts` (no Supabase/Realtime yet):
+`npm run dev` serves a Bento grid. With `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` set it reads the real data: an initial fetch of `quota_snapshots`, the latest 200 `agent_telemetry_logs` and `orchestrator_control`, then a single Supabase Realtime `postgres_changes` channel that updates the cards, feed and control state (`lib/supabase-source.ts` + `hooks/useLiveData.ts`). Without the env vars it keeps using `src/mock/snapshots.ts` and `src/mock/turns.ts`; `<main data-testid="data-source" data-mode="live|mock">` shows which mode is active. There is no automatic fallback to mock when a live fetch fails — only a missing env switches to mock.
 
 - **Quota card** (`components/QuotaHealthCards.tsx`) — one grouped card with a section per provider (Claude Code, then OpenCode Go); each section lists its window rows with usage percent, progress bar and reset countdown (`groupQuotaBars` in `lib/quota-cards.ts`).
 - **Burn Rate & Anomaly Monitor** (`components/BurnRateMonitor.tsx`) — TPM, time-to-limit for the OpenCode Go cycle (Claude shows `--`), and a red loop badge per agent detected by `detectLoops`.
-- **Circuit Breaker Controls** (`components/CircuitBreakerControls.tsx`) — RUNNING/PAUSED toggle plus warning and auto-pause thresholds (defaults 80 and 90). Thresholds are validated client-side with the same rule as `/api/control` (integers `1`–`100`, warning ≤ auto-pause). It talks to a `ControlApi`; for now `App.tsx` wires the in-memory `createMockControlApi()` from `lib/control-api.ts`, so no request hits `/api/control` yet.
+- **Circuit Breaker Controls** (`components/CircuitBreakerControls.tsx`) — RUNNING/PAUSED display plus warning and auto-pause thresholds (defaults 80 and 90). Thresholds are validated client-side with the same rule as `/api/control` (integers `1`–`100`, warning ≤ auto-pause). It talks to a `ControlApi`; in live mode `App.tsx` uses `createReadOnlyControlApi` so the control row comes from Supabase (and Realtime updates re-key the panel), and the "Lưu" button rejects with "Chưa nối /api/control". With mock data it uses `createMockControlApi()`.
 - **Active Agents Feed** (`components/ActiveAgentsFeed.tsx`) — the most recent turns (agent, model, task, tokens, cache ratio, age).
 - **Push onboarding banner** (`components/PushOnboardingBanner.tsx`) — on iOS Safari without the standalone display mode it shows the "Share → Add to Home Screen → open from Home Screen" steps instead of asking for notifications; otherwise, when permission is `default`, it shows a "Bật thông báo" button that calls `Notification.requestPermission()` only on click. Dismissing stores `localStorage['push-onboarding-dismissed']`, and the state rules live in `lib/push-onboarding.ts`.
 
-The pure logic lives in `src/lib/` (`quota.ts`, `quota-cards.ts`, `anomaly.ts`, `burn-rate.ts`, `circuit-breaker.ts`, `push-onboarding.ts`, `control-api.ts`); the quota/burn-rate helpers take `now` as a parameter, and the module is covered by Vitest.
+The pure logic lives in `src/lib/` (`quota.ts`, `quota-cards.ts`, `anomaly.ts`, `burn-rate.ts`, `circuit-breaker.ts`, `push-onboarding.ts`, `control-api.ts`, `live-data.ts`); the quota/burn-rate helpers take `now` as a parameter, `live-data.ts` holds the row mappers/reducers and `startLive` (no env access), and the modules are covered by Vitest. `supabase-source.ts` is the only dashboard module that imports `@supabase/supabase-js`.
 
 ## PWA
 
@@ -70,7 +70,7 @@ Push **subscription** registration (calling `POST /api/subscribe`) is still pend
 
 ## Environment variables
 
-Copy `.env.example` to `.env` and fill in real values. All of these are **server-side only**; never commit real secrets. The service role key must never reach the browser.
+Copy `.env.example` to `.env` and fill in real values. The server-side secrets are read only by the API routes; never commit real secrets, and the service role key must never reach the browser.
 
 | Variable | Purpose |
 | --- | --- |
@@ -81,7 +81,14 @@ Copy `.env.example` to `.env` and fill in real values. All of these are **server
 | `VAPID_PRIVATE_KEY` | Web Push private key. |
 | `VAPID_SUBJECT` | Push contact, e.g. `mailto:you@example.com`. |
 
-Variables are read inside functions (`getEnv()`/factories), not at module import time, so tests can import the modules without env.
+Client-side (baked into the Vite bundle, safe to expose because RLS + the `0002` select policies limit reads to the three dashboard tables):
+
+| Variable | Purpose |
+| --- | --- |
+| `VITE_SUPABASE_URL` | Supabase project URL used by the dashboard for initial fetch + Realtime. |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anon key used by the dashboard (read-only; the service role key is never bundled). |
+
+Set both `VITE_*` variables to read live data; if either is missing the dashboard falls back to mock data. Server variables are read inside functions (`getEnv()`/factories), not at module import time, so tests can import the modules without env.
 
 ## Database
 
@@ -423,7 +430,7 @@ curl "$APP_URL/api/status" -H "Authorization: Bearer $INGEST_API_KEY"
 
 ```bash
 npm install           # install dependencies
-npm run dev           # Vite dev server (mock-data dashboard)
+npm run dev           # Vite dev server (live data when VITE_SUPABASE_* is set, otherwise mock)
 npm run build         # tsc -b && vite build
 npm run typecheck     # tsc -b --noEmit (src + api + tests)
 npm run test          # vitest run
@@ -432,6 +439,6 @@ npx vitest run tests/api.test.ts   # run only the API spec
 
 ## Not implemented yet
 
-- **Phase 2 (PWA frontend):** the dashboard UI renders from mock data; Supabase Realtime subscriptions, live data, and push subscription registration (`POST /api/subscribe`) are still pending. The service worker already handles incoming `push`/`notificationclick`, the manifest is configured, and the onboarding banner covers install/permission UX (it does not subscribe). The Circuit Breaker Controls use the in-memory mock `ControlApi`, not `POST /api/control` yet.
+- **Phase 2 (PWA frontend):** the dashboard reads live quota/telemetry/control from Supabase (initial fetch + Realtime) when `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` are set, otherwise it renders mock data. Still pending: dashboard control writes (`POST /api/control` — the Circuit Breaker panel is read-only in live mode and its "Lưu" button errors) and push subscription registration (`POST /api/subscribe`). The service worker already handles incoming `push`/`notificationclick`, the manifest is configured, and the onboarding banner covers install/permission UX (it does not subscribe).
 - **Phase 3 (host hooks):** the Claude Code hook (`hooks/claude-code/`) and the OpenCode Go plugin (`hooks/opencode/`) are implemented; install steps are in [macOS setup guide](#macos-setup-guide-phase-3d).
 - **Phase 3c:** circuit breaker / follow-up work on top of the host hooks.
