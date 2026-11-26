@@ -18,6 +18,7 @@ This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, 
 api/
   ingest.ts            POST /api/ingest handler
   status.ts            GET /api/status handler
+  control.ts           POST /api/control handler (toggle pause + thresholds)
   _lib/
     auth.ts            Bearer token check (timingSafeEqual)
     ingest.ts          processIngest: snapshot update + auto-pause logic
@@ -38,7 +39,7 @@ Copy `.env.example` to `.env` and fill in real values. All of these are **server
 
 | Variable | Purpose |
 | --- | --- |
-| `INGEST_API_KEY` | Bearer token required by `POST /api/ingest` and `GET /api/status`. |
+| `INGEST_API_KEY` | Bearer token required by `POST /api/ingest`, `GET /api/status` and `POST /api/control`. |
 | `SUPABASE_URL` | Supabase project URL. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key used by the API routes (bypasses RLS). |
 | `VAPID_PUBLIC_KEY` | Web Push public key. |
@@ -162,6 +163,35 @@ Response (`200`):
   ]
 }
 ```
+
+### `POST /api/control`
+
+Partial update of the single `orchestrator_control` row. Send any subset of `global_status`, `auto_pause_threshold` and `downgrade_model_threshold`; omitted fields keep their current value. The two thresholds are integers `1`–`100`, and `downgrade_model_threshold` must be less than or equal to `auto_pause_threshold` after merging with the stored values.
+
+```bash
+curl -X POST "$APP_URL/api/control" \
+  -H "Authorization: Bearer $INGEST_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "global_status": "paused", "auto_pause_threshold": 95 }'
+```
+
+Response (`200`):
+
+```json
+{
+  "ok": true,
+  "global_status": "paused",
+  "auto_pause_threshold": 95,
+  "downgrade_model_threshold": 80
+}
+```
+
+Errors:
+
+- `400` — invalid body (no valid field, `global_status` not `running`/`paused`, threshold out of `1`–`100`, or `downgrade_model_threshold > auto_pause_threshold`).
+- `401` — missing or wrong bearer token.
+- `405` — method other than `POST`.
+- `500` — database failure.
 
 ## Commands
 

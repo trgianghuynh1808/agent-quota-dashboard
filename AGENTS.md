@@ -6,13 +6,13 @@ Guidelines for coding agents working in this repo.
 
 ## Project Overview
 
-`agent-quota-dashboard` is a quota & telemetry dashboard for Claude Code and OpenCode Go, built in phases from `docs/SPEC.md`. Phase 1 is in place: Vite + React + TS + Tailwind + PWA scaffold, Supabase schema, Vercel API routes (`POST /api/ingest`, `GET /api/status`), threshold auto-pause and Web Push. Phase 2 (PWA dashboard) and Phase 3 (host hooks) are not built yet.
+`agent-quota-dashboard` is a quota & telemetry dashboard for Claude Code and OpenCode Go, built in phases from `docs/SPEC.md`. Phase 1 is in place: Vite + React + TS + Tailwind + PWA scaffold, Supabase schema, Vercel API routes (`POST /api/ingest`, `GET /api/status`, `POST /api/control`), threshold auto-pause and Web Push. Phase 2 (PWA dashboard) and Phase 3 (host hooks) are not built yet.
 - App stack: Vite + React 19 + TypeScript + Tailwind CSS v4 + vite-plugin-pwa; Vercel Node API routes in `api/`; Supabase Postgres + Realtime; Vitest for tests.
 - Tooling stack: bash scripts + one Python 3 helper (`scripts/room-ops.py`); Claude plans/verifies, OpenCode implements.
 
 ## Architecture
 
-- App architecture: the API handlers (`api/ingest.ts`, `api/status.ts`) build real dependencies lazily via `createSupabaseDb()` / `createPushNotifier()`; business logic lives in `api/_lib/` behind the injected `Db` + `notify` interfaces, so tests use an in-memory `FakeDb`. `quota_snapshots` stores the current quota (`claude_code` absolute upsert, `opencode_go` atomic increment through the RPC `increment_opencode_usage`), `agent_telemetry_logs` stores per-turn history, `orchestrator_control` holds the single control row, and `push_subscriptions` stores Web Push subscriptions. All tables enable RLS with no policies: only the service role (server) can access them.
+- App architecture: the API handlers (`api/ingest.ts`, `api/status.ts`, `api/control.ts`) build real dependencies lazily via `createSupabaseDb()` / `createPushNotifier()`; business logic lives in `api/_lib/` behind the injected `Db` + `notify` interfaces, so tests use an in-memory `FakeDb`. `quota_snapshots` stores the current quota (`claude_code` absolute upsert, `opencode_go` atomic increment through the RPC `increment_opencode_usage`), `agent_telemetry_logs` stores per-turn history, `orchestrator_control` holds the single control row, and `push_subscriptions` stores Web Push subscriptions. All tables enable RLS with no policies: only the service role (server) can access them.
 - App dev URL: the config default is `http://localhost:5173` (`DEFAULT_VERIFY_URL` in `.agents/config.sh`); the Vite dev server serves the placeholder page there. In a room, `APP_PORT` / `PLAYWRIGHT_BASE_URL` come from `.agents/room.env`.
 - Agent tooling: Claude hands tasks to OpenCode through files. `scripts/handoff.sh` writes a job to `.agents/queue/`, `scripts/watch-tasks.sh` picks it up and runs `scripts/run-task.sh`, and status goes to `.agents/status/<task>.status` (`queued` -> `running` -> `done` | `stuck`), which `scripts/wait-task.sh` polls.
 - State lives in files: task plans in `.agents/tasks/`, the multi-room board in `.agents/board.md`, logs in `.agents/run.log`. The runtime paths are gitignored (see `.gitignore`).
@@ -29,7 +29,7 @@ Guidelines for coding agents working in this repo.
 - `scripts/handoff.sh`, `scripts/watch-tasks.sh`, `scripts/run-task.sh`, `scripts/wait-task.sh` - hand a task to OpenCode, run it step by step, wait for it.
 - `scripts/notify.sh`, `scripts/board-view.sh`, `scripts/log-gaps.sh` - desktop notification, board viewer, run-log timing analysis.
 - Main flow: plan on `task/<slug>` -> `handoff.sh` -> `watch-tasks.sh` runs `run-task.sh` -> Verify/review -> squash-merge and ship (see CLAUDE.md).
-- `api/` - Vercel Node API routes: `ingest.ts`, `status.ts`, and `_lib/` (`types`, `auth`, `validate`, `ingest`, `supabase-db`, `push`).
+- `api/` - Vercel Node API routes: `ingest.ts`, `status.ts`, `control.ts`, and `_lib/` (`types`, `auth`, `validate`, `ingest`, `supabase-db`, `push`).
 - `src/` - React placeholder app (`App.tsx`, `main.tsx`, `index.css`); the dashboard comes in Phase 2.
 - `supabase/migrations/` - SQL migrations; `0001_init.sql` holds the Phase 1 schema and `increment_opencode_usage`.
 - `tests/` - Vitest specs and the in-memory `FakeDb` (`fake-db.ts`, `api.test.ts`).

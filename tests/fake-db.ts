@@ -1,6 +1,7 @@
 import type {
   ClaudeCodeIngest,
   Control,
+  ControlPatch,
   Db,
   LogEntry,
   Provider,
@@ -70,6 +71,11 @@ export class FakeDb implements Db {
 
   async setPaused(): Promise<void> {
     this.control.global_status = 'paused'
+  }
+
+  async updateControl(patch: ControlPatch): Promise<Control> {
+    Object.assign(this.control, patch)
+    return { ...this.control }
   }
 
   async listSnapshots(): Promise<QuotaSnapshot[]> {

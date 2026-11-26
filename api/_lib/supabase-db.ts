@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import type {
   ClaudeCodeIngest,
   Control,
+  ControlPatch,
   Db,
   LogEntry,
   QuotaSnapshot,
@@ -103,6 +104,22 @@ export function createSupabaseDb(): Db {
         .update({ global_status: 'paused', updated_at: new Date().toISOString() })
         .eq('id', 1)
       if (error) throw new Error(`setPaused failed: ${error.message}`)
+    },
+
+    async updateControl(patch: ControlPatch): Promise<Control> {
+      const { data, error } = await client
+        .from('orchestrator_control')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', 1)
+        .select('global_status, auto_pause_threshold, downgrade_model_threshold')
+        .single()
+      if (error) throw new Error(`updateControl failed: ${error.message}`)
+      const row = data as Record<string, unknown>
+      return {
+        global_status: row.global_status as Control['global_status'],
+        auto_pause_threshold: Number(row.auto_pause_threshold),
+        downgrade_model_threshold: Number(row.downgrade_model_threshold),
+      }
     },
 
     async listSnapshots(): Promise<QuotaSnapshot[]> {
