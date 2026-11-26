@@ -1,4 +1,11 @@
-import type { Control, GlobalStatus, LogEntry, Provider, QuotaSnapshot } from '../../api/_lib/types.js'
+import type {
+  Control,
+  GlobalStatus,
+  LogEntry,
+  OpencodeWindow,
+  Provider,
+  QuotaSnapshot,
+} from '../../api/_lib/types.js'
 import type { FeedTurn } from './burn-rate.js'
 
 export interface LiveSourceHandlers {
@@ -21,7 +28,9 @@ export interface SnapshotRow {
   cycle_tokens_used: number | string | null
   cycle_token_limit: number | string | null
   reset_at: string | null
+  reset_7d_at?: string | null
   updated_at: string | null
+  opencode_windows?: unknown
 }
 
 export interface TurnRow {
@@ -38,8 +47,6 @@ export interface TurnRow {
 
 export interface ControlRow {
   global_status: string | null
-  auto_pause_threshold: number | string | null
-  downgrade_model_threshold: number | string | null
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -69,7 +76,22 @@ function toGlobalStatus(value: string | null | undefined): GlobalStatus {
   return value === 'paused' ? 'paused' : 'running'
 }
 
+function toOpencodeWindows(value: unknown): OpencodeWindow[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const windows: OpencodeWindow[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
+    const record = item as Record<string, unknown>
+    if (record.id !== '5h' && record.id !== '7d' && record.id !== '30d') continue
+    if (typeof record.percent !== 'number') continue
+    if (typeof record.reset_at !== 'string') continue
+    windows.push({ id: record.id, percent: record.percent, reset_at: record.reset_at })
+  }
+  return windows.length > 0 ? windows : undefined
+}
+
 export function rowToSnapshot(row: SnapshotRow): QuotaSnapshot {
+  const opencodeWindows = toOpencodeWindows(row.opencode_windows)
   return {
     provider: toProvider(row.provider),
     window_5h_percent: toNumberOrNull(row.window_5h_percent),
@@ -77,7 +99,9 @@ export function rowToSnapshot(row: SnapshotRow): QuotaSnapshot {
     cycle_tokens_used: toNumber(row.cycle_tokens_used),
     cycle_token_limit: toNumberOrNull(row.cycle_token_limit),
     reset_at: toTextOrNull(row.reset_at),
+    reset_7d_at: toTextOrNull(row.reset_7d_at),
     updated_at: toText(row.updated_at),
+    ...(opencodeWindows !== undefined ? { opencode_windows: opencodeWindows } : {}),
   }
 }
 
@@ -98,8 +122,6 @@ export function rowToTurn(row: TurnRow): FeedTurn {
 export function rowToControl(row: ControlRow): Control {
   return {
     global_status: toGlobalStatus(row.global_status),
-    auto_pause_threshold: toNumber(row.auto_pause_threshold),
-    downgrade_model_threshold: toNumber(row.downgrade_model_threshold),
   }
 }
 
@@ -122,8 +144,6 @@ export interface LiveState {
 
 export const DEFAULT_CONTROL: Control = {
   global_status: 'running',
-  auto_pause_threshold: 90,
-  downgrade_model_threshold: 80,
 }
 
 export function startLive(source: LiveSource, onState: (state: LiveState) => void): () => void {

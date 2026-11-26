@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createQuotaSync } from '../hooks/opencode/quota-sync.js'
-import type { QuotaSyncState } from '../hooks/opencode/quota-sync.js'
 import { parseIngestPayload } from '../api/_lib/validate.js'
 import type { IngestPayload } from '../api/_lib/types.js'
-
-const DAY_MS = 24 * 60 * 60 * 1000
-const NOW = 1_700_000_000_000
 
 function createOkFetch() {
   return vi.fn<typeof fetch>(async () => new Response('{}'))
@@ -14,7 +10,7 @@ function createOkFetch() {
 interface FetchCall {
   url: string
   headers: Record<string, string>
-  body: unknown
+  body: Record<string, unknown>
 }
 
 function readCall(call: Parameters<typeof fetch>): FetchCall {
@@ -22,7 +18,7 @@ function readCall(call: Parameters<typeof fetch>): FetchCall {
   return {
     url: String(url),
     headers: (init?.headers ?? {}) as Record<string, string>,
-    body: JSON.parse(String(init?.body)),
+    body: JSON.parse(String(init?.body)) as Record<string, unknown>,
   }
 }
 
@@ -32,7 +28,7 @@ function expectIngest(body: unknown): IngestPayload {
   return parsed.value
 }
 
-function completedMessage(id: string) {
+function completedMessage(id: string, totalTokens = 1000) {
   return {
     type: 'message.updated',
     properties: {
@@ -42,7 +38,7 @@ function completedMessage(id: string) {
         providerID: 'opencode-go',
         modelID: 'glm-5.3',
         tokens: {
-          total: 1000,
+          total: totalTokens,
           input: 900,
           output: 100,
           reasoning: 0,
@@ -61,10 +57,6 @@ describe('T1: delta message completed', () => {
     const sync = createQuotaSync({
       fetch: fetchMock,
       env: { APP_URL: 'http://x.test', INGEST_API_KEY: apiKey },
-      now: () => NOW,
-      readUsage: vi.fn(async () => 0),
-      readState: vi.fn(async () => ({ backfilled: true })),
-      writeState: vi.fn(async () => {}),
     })
 
     const message = completedMessage('msg-A')
@@ -100,92 +92,60 @@ describe('T1: delta message completed', () => {
   })
 })
 
-describe('T2: backfill once', () => {
-  it('sends the local baseline once then never again', async () => {
-    let state: QuotaSyncState | null = null
+describe('T23-T2: chỉ gửi delta token, không backfill, không cycle_token_limit', () => {
+  it('sends only the delta, ignores the cycle limit env, never backfills', async () => {
     const fetchMock = createOkFetch()
-    const readUsage = vi.fn(async () => 123456)
-    const deps = {
-      fetch: fetchMock,
-      env: { APP_URL: 'http://x.test', INGEST_API_KEY: `k-${Date.now()}` },
-      now: () => NOW,
-      readUsage,
-      readState: vi.fn(async () => state),
-      writeState: vi.fn(async (next: { backfilled: boolean }) => {
-        state = next
-      }),
+    const env = {
+      APP_URL: 'https://x.test',
+      INGEST_API_KEY: 'k',
+      OPENCODE_CYCLE_TOKEN_LIMIT: '500000',
     }
+    const sync = createQuotaSync({ fetch: fetchMock, env })
 
-    const sync = createQuotaSync(deps)
-    await sync.backfillInitialUsage()
-    await sync.backfillInitialUsage()
-    const secondSync = createQuotaSync(deps)
-    await secondSync.backfillInitialUsage()
+    const message = completedMessage(`msg-${Date.now()}`, 1200)
+    await sync.handleEvent(message)
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const call = readCall(fetchMock.mock.calls[0])
+    expect(call.url).toBe('https://x.test/api/ingest')
+    expect(call.headers.Authorization).toBe('Bearer k')
     const payload = expectIngest(call.body)
-    expect(payload).toMatchObject({
-      provider: 'opencode_go',
-      agent_id: 'opencode-go',
-      delta_tokens: 123456,
-      input_tokens: 0,
-      output_tokens: 0,
-      cache_read_tokens: 0,
+    if (payload.provider !== 'opencode_go') throw new Error('expected opencode_go payload')
+    expect(payload.delta_tokens).toBe(1200)
+    expect('cycle_token_limit' in call.body).toBe(false)
+
+    await sync.handleEvent(message)
+    await sync.handleEvent({ type: 'session.idle' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const syncNoKey = createQuotaSync({
+      fetch: fetchMock,
+      env: { APP_URL: 'https://x.test', OPENCODE_CYCLE_TOKEN_LIMIT: '500000' },
     })
-    expect(deps.writeState).toHaveBeenCalledTimes(1)
-    expect(deps.writeState).toHaveBeenCalledWith({ backfilled: true })
-    expect(readUsage).toHaveBeenCalledTimes(1)
-    expect(readUsage).toHaveBeenCalledWith(NOW - 30 * DAY_MS)
+    await syncNoKey.handleEvent(completedMessage(`msg-2-${Date.now()}`, 1200))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    expect('backfillInitialUsage' in sync).toBe(false)
   })
 })
 
 describe('T3: never breaks OpenCode', () => {
-  it('stays silent on network errors, missing config and usage failures', async () => {
-    const writeStateA = vi.fn(async () => {})
+  it('stays silent on network errors, missing config and unknown events', async () => {
     const syncA = createQuotaSync({
       fetch: vi.fn<typeof fetch>(async () => {
         throw new Error('network')
       }),
       env: { APP_URL: 'http://x.test', INGEST_API_KEY: `k-${Date.now()}` },
-      now: () => NOW,
-      readUsage: vi.fn(async () => 100),
-      readState: vi.fn(async () => null),
-      writeState: writeStateA,
     })
     await syncA.handleEvent(completedMessage(`msg-A-${Date.now()}`))
-    await syncA.backfillInitialUsage()
-    expect(writeStateA).not.toHaveBeenCalled()
 
     const fetchB = createOkFetch()
     const syncB = createQuotaSync({
       fetch: fetchB,
       env: { APP_URL: 'http://x.test' },
-      now: () => NOW,
-      readUsage: vi.fn(async () => {
-        throw new Error('db')
-      }),
-      readState: vi.fn(async () => null),
-      writeState: vi.fn(async () => {}),
     })
     await syncB.handleEvent(completedMessage(`msg-B-${Date.now()}`))
-    await syncB.backfillInitialUsage()
+    await syncB.handleEvent({ type: 'session.idle' })
     expect(fetchB).not.toHaveBeenCalled()
-
-    const fetchC = createOkFetch()
-    const writeStateC = vi.fn(async () => {})
-    const syncC = createQuotaSync({
-      fetch: fetchC,
-      env: { APP_URL: 'http://x.test', INGEST_API_KEY: `k-${Date.now()}` },
-      now: () => NOW,
-      readUsage: vi.fn(async () => {
-        throw new Error('db')
-      }),
-      readState: vi.fn(async () => null),
-      writeState: writeStateC,
-    })
-    await syncC.backfillInitialUsage()
-    expect(fetchC).not.toHaveBeenCalled()
-    expect(writeStateC).not.toHaveBeenCalled()
   })
 })

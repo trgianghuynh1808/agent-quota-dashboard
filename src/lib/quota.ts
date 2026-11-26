@@ -1,5 +1,3 @@
-import type { QuotaSnapshot } from '../../api/_lib/types.js'
-
 const MS_PER_SECOND = 1000
 const MS_PER_MINUTE = 60_000
 const MS_PER_HOUR = 3_600_000
@@ -22,15 +20,6 @@ export function effectivePercent(
 ): number | null {
   if (percent === null) return null
   return isExpired(resetAt, now) ? 0 : percent
-}
-
-export function effectiveCycleUsed(s: QuotaSnapshot, now: number): number {
-  return isExpired(s.reset_at, now) ? 0 : s.cycle_tokens_used
-}
-
-export function cyclePercent(used: number, limit: number | null): number | null {
-  if (limit === null || limit <= 0) return null
-  return clamp((used / limit) * 100, 0, 100)
 }
 
 export interface Countdown {
@@ -76,12 +65,6 @@ export function tokensPerMinute(samples: TokenSample[], now: number, windowMs = 
     0,
   )
   return total / (windowMs / MS_PER_MINUTE)
-}
-
-export function timeToLimitMs(remaining: number, tpm: number): number | null {
-  if (tpm <= 0) return null
-  if (remaining <= 0) return 0
-  return (remaining / tpm) * MS_PER_MINUTE
 }
 
 export function cacheRatio(cacheRead: number, totalInput: number): number | null {

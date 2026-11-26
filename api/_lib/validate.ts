@@ -1,10 +1,4 @@
-import type {
-  ClaudeCodeIngest,
-  ControlPatch,
-  IngestPayload,
-  OpencodeGoIngest,
-  PushSubscriptionInput,
-} from './types.js'
+import type { ClaudeCodeIngest, ControlPatch, IngestPayload, OpencodeGoIngest } from './types.js'
 
 export type ParseResult =
   | { ok: true; value: IngestPayload }
@@ -14,16 +8,8 @@ export type ControlPatchResult =
   | { ok: true; value: ControlPatch }
   | { ok: false; error: string }
 
-export type SubscriptionResult =
-  | { ok: true; value: PushSubscriptionInput }
-  | { ok: false; error: string }
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isThreshold(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100
 }
 
 export function parseControlPatch(body: unknown): ControlPatchResult {
@@ -37,38 +23,15 @@ export function parseControlPatch(body: unknown): ControlPatchResult {
   }
   if (!isRecord(data)) return { ok: false, error: 'Body must be a JSON object' }
 
-  const patch: ControlPatch = {}
-
-  if (data.global_status !== undefined) {
-    if (data.global_status !== 'running' && data.global_status !== 'paused') {
-      return { ok: false, error: 'global_status must be running or paused' }
-    }
-    patch.global_status = data.global_status
+  if (data.global_status === undefined) {
+    return { ok: false, error: 'global_status is required' }
   }
 
-  if (data.auto_pause_threshold !== undefined) {
-    if (!isThreshold(data.auto_pause_threshold)) {
-      return { ok: false, error: 'auto_pause_threshold must be an integer between 1 and 100' }
-    }
-    patch.auto_pause_threshold = data.auto_pause_threshold
+  if (data.global_status !== 'running' && data.global_status !== 'paused') {
+    return { ok: false, error: 'global_status must be running or paused' }
   }
 
-  if (data.downgrade_model_threshold !== undefined) {
-    if (!isThreshold(data.downgrade_model_threshold)) {
-      return { ok: false, error: 'downgrade_model_threshold must be an integer between 1 and 100' }
-    }
-    patch.downgrade_model_threshold = data.downgrade_model_threshold
-  }
-
-  if (Object.keys(patch).length === 0) {
-    return {
-      ok: false,
-      error:
-        'at least one of global_status, auto_pause_threshold, downgrade_model_threshold is required',
-    }
-  }
-
-  return { ok: true, value: patch }
+  return { ok: true, value: { global_status: data.global_status } }
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -152,11 +115,46 @@ export function parseIngestPayload(body: unknown): ParseResult {
       return { ok: false, error: 'window_5h_percent and window_7d_percent must be numbers between 0 and 100' }
     }
 
+    let reset7dAt: string | undefined
+    if (data.reset_7d_at !== undefined) {
+      if (typeof data.reset_7d_at !== 'string' || Number.isNaN(Date.parse(data.reset_7d_at))) {
+        return { ok: false, error: 'reset_7d_at must be an ISO date string' }
+      }
+      reset7dAt = data.reset_7d_at
+    }
+
     const value: ClaudeCodeIngest = {
       ...base,
       provider: 'claude_code',
       window_5h_percent: window5h,
       window_7d_percent: window7d,
+      ...(reset7dAt !== undefined ? { reset_7d_at: reset7dAt } : {}),
+    }
+    return { ok: true, value }
+  }
+
+  const windowId = data.window_id
+  if (windowId !== undefined && windowId !== '5h' && windowId !== '7d' && windowId !== '30d') {
+    return { ok: false, error: 'window_id must be 5h, 7d or 30d' }
+  }
+
+  if (windowId !== undefined) {
+    if (data.window_percent === undefined) {
+      return { ok: false, error: 'window_percent is required when window_id is set' }
+    }
+    if (!isPercent(data.window_percent)) {
+      return { ok: false, error: 'window_percent must be a number between 0 and 100' }
+    }
+    if (resetAt === undefined) {
+      return { ok: false, error: 'reset_at is required when window_id is set' }
+    }
+
+    const value: OpencodeGoIngest = {
+      ...base,
+      provider: 'opencode_go',
+      delta_tokens: 0,
+      window_id: windowId,
+      window_percent: data.window_percent,
     }
     return { ok: true, value }
   }
@@ -166,55 +164,10 @@ export function parseIngestPayload(body: unknown): ParseResult {
     return { ok: false, error: 'delta_tokens must be a non-negative integer' }
   }
 
-  let cycleTokenLimit: number | undefined
-  if (data.cycle_token_limit !== undefined) {
-    const limit = data.cycle_token_limit
-    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit <= 0) {
-      return { ok: false, error: 'cycle_token_limit must be a positive integer' }
-    }
-    cycleTokenLimit = limit
-  }
-
   const value: OpencodeGoIngest = {
     ...base,
     provider: 'opencode_go',
     delta_tokens: deltaTokens,
-    ...(cycleTokenLimit !== undefined ? { cycle_token_limit: cycleTokenLimit } : {}),
   }
   return { ok: true, value }
-}
-
-export function parseSubscription(body: unknown): SubscriptionResult {
-  let data = body
-  if (typeof data === 'string') {
-    try {
-      data = JSON.parse(data)
-    } catch {
-      return { ok: false, error: 'Body must be valid JSON' }
-    }
-  }
-  if (!isRecord(data)) return { ok: false, error: 'Body must be a JSON object' }
-
-  if (typeof data.endpoint !== 'string' || !data.endpoint.startsWith('https://')) {
-    return { ok: false, error: 'endpoint must be an https:// URL' }
-  }
-
-  if (!isRecord(data.keys)) return { ok: false, error: 'keys must be an object' }
-
-  if (!isNonEmptyString(data.keys.p256dh)) {
-    return { ok: false, error: 'keys.p256dh is required' }
-  }
-
-  if (!isNonEmptyString(data.keys.auth)) {
-    return { ok: false, error: 'keys.auth is required' }
-  }
-
-  return {
-    ok: true,
-    value: {
-      endpoint: data.endpoint,
-      p256dh: data.keys.p256dh,
-      auth: data.keys.auth,
-    },
-  }
 }

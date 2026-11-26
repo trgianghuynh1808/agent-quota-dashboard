@@ -1,5 +1,4 @@
 import type { Control, ControlPatch } from '../../api/_lib/types.js'
-import { validateThresholds } from './circuit-breaker.js'
 
 export interface ControlApi {
   getControl(): Promise<Control>
@@ -14,8 +13,6 @@ function wait(ms: number): Promise<void> {
 export function createMockControlApi(
   initial: Control = {
     global_status: 'running',
-    auto_pause_threshold: 90,
-    downgrade_model_threshold: 80,
   },
   delayMs = 0,
 ): ControlApi {
@@ -27,10 +24,7 @@ export function createMockControlApi(
     },
     async updateControl(patch: ControlPatch): Promise<Control> {
       await wait(delayMs)
-      const merged: Control = { ...state, ...patch }
-      const error = validateThresholds(merged.downgrade_model_threshold, merged.auto_pause_threshold)
-      if (error !== null) throw new Error(error)
-      state = merged
+      state = { ...state, ...patch }
       return { ...state }
     },
   }

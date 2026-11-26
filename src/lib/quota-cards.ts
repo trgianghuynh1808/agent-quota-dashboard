@@ -1,11 +1,5 @@
 import type { OpencodeWindow, QuotaSnapshot } from '../../api/_lib/types.js'
-import {
-  countdown,
-  cyclePercent,
-  effectiveCycleUsed,
-  effectivePercent,
-  formatCountdown,
-} from './quota.js'
+import { countdown, effectivePercent, formatCountdown } from './quota.js'
 
 export type QuotaLevel = 'ok' | 'warn' | 'critical' | 'unknown'
 
@@ -73,7 +67,7 @@ export function buildQuotaCards(snapshots: QuotaSnapshot[], now: number): QuotaB
   )
   const claude7d = effectivePercent(
     claude?.window_7d_percent ?? null,
-    claude?.reset_at ?? null,
+    claude?.reset_7d_at ?? null,
     now,
   )
 
@@ -90,44 +84,24 @@ export function buildQuotaCards(snapshots: QuotaSnapshot[], now: number): QuotaB
       label: 'Claude Code · 7d',
       percent: claude7d,
       level: levelFor(claude7d),
-      resetText: claude ? resetText(claude.reset_at, now) : '--',
+      resetText: claude ? resetText(claude.reset_7d_at ?? null, now) : '--',
     },
   ]
 
-  const windows = opencode?.opencode_windows
-  if (opencode && windows && windows.length > 0) {
-    const opencodeBars = OPENCODE_WINDOWS.map(({ id, label }): QuotaBar => {
-      const window = windows.find((w) => w.id === id)
-      const percent = window
-        ? effectivePercent(window.percent, window.reset_at, now)
-        : null
-      return {
-        id: `opencode-${id}`,
-        label,
-        percent,
-        level: levelFor(percent),
-        resetText: window ? resetText(window.reset_at, now) : '--',
-      }
-    })
-    return [...claudeBars, ...opencodeBars]
-  }
+  const windows = opencode?.opencode_windows ?? []
+  const opencodeBars = OPENCODE_WINDOWS.map(({ id, label }): QuotaBar => {
+    const window = windows.find((w) => w.id === id)
+    const percent = window
+      ? effectivePercent(window.percent, window.reset_at, now)
+      : null
+    return {
+      id: `opencode-${id}`,
+      label,
+      percent,
+      level: levelFor(percent),
+      resetText: window ? resetText(window.reset_at, now) : '--',
+    }
+  })
 
-  const opencodePercent =
-    opencode === null
-      ? null
-      : cyclePercent(
-          effectiveCycleUsed(opencode, now),
-          opencode.cycle_token_limit,
-        )
-
-  return [
-    ...claudeBars,
-    {
-      id: 'opencode-cycle',
-      label: 'OpenCode Go · Cycle',
-      percent: opencodePercent,
-      level: levelFor(opencodePercent),
-      resetText: opencode ? resetText(opencode.reset_at, now) : '--',
-    },
-  ]
+  return [...claudeBars, ...opencodeBars]
 }

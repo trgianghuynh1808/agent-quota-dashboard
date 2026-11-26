@@ -25,8 +25,6 @@ export function createStatusHandler(deps: StatusHandlerDeps) {
       const snapshots = await deps.db.listSnapshots()
       res.status(200).json({
         global_status: control.global_status,
-        auto_pause_threshold: control.auto_pause_threshold,
-        downgrade_model_threshold: control.downgrade_model_threshold,
         snapshots,
       })
     } catch (error) {

@@ -9,9 +9,6 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      workbox: {
-        importScripts: ['push-sw.js'],
-      },
       manifest: {
         id: '/',
         name: 'Agent Quota Dashboard',

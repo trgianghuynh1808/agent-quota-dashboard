@@ -11,6 +11,7 @@ export function mockSnapshots(now: number): QuotaSnapshot[] {
     cycle_tokens_used: 0,
     cycle_token_limit: null,
     reset_at: new Date(now + 2 * MS_PER_HOUR).toISOString(),
+    reset_7d_at: new Date(now + 3 * MS_PER_DAY).toISOString(),
     updated_at: new Date(now).toISOString(),
   }
 

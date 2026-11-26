@@ -99,6 +99,65 @@ describe.skipIf(!hasJq)('claude-code quota-ingest hook', () => {
     }
   })
 
+  it('T4: sends both the 5h and 7d reset timestamps when present', async () => {
+    const { dir, argsFile } = makeTempDirWithFakeCurl()
+    const stdin = JSON.stringify({
+      session_id: 's1',
+      model: { id: 'claude-sonnet-x' },
+      rate_limits: {
+        five_hour: { used_percentage: 12.5, resets_at: 1790000000 },
+        seven_day: { used_percentage: 40, resets_at: 1790500000 },
+      },
+    })
+
+    const result = runHook(stdin, dir, argsFile, {
+      APP_URL: 'http://x.test',
+      INGEST_API_KEY: `k-${Date.now()}`,
+    })
+
+    expect(result.status).toBe(0)
+    expect(await waitForArgsFile(argsFile)).toBe(true)
+
+    const lines = readFileSync(argsFile, 'utf8').split('\n')
+    const body = argValueAfter(lines, '-d')
+    expect(body).toBeTruthy()
+
+    const parsed = parseIngestPayload(JSON.parse(body as string))
+    expect(parsed.ok).toBe(true)
+    if (parsed.ok && parsed.value.provider === 'claude_code') {
+      expect(parsed.value.reset_at).toBe(
+        new Date(1790000000 * 1000).toISOString().replace('.000Z', 'Z'),
+      )
+      expect(parsed.value.reset_7d_at).toBe(
+        new Date(1790500000 * 1000).toISOString().replace('.000Z', 'Z'),
+      )
+    }
+  })
+
+  it('T5: omits reset_7d_at and still exits 0 when seven_day has no resets_at', async () => {
+    const { dir, argsFile } = makeTempDirWithFakeCurl()
+    const stdin = JSON.stringify({
+      session_id: 's1',
+      rate_limits: {
+        five_hour: { used_percentage: 12.5, resets_at: 1790000000 },
+        seven_day: { used_percentage: 40 },
+      },
+    })
+
+    const result = runHook(stdin, dir, argsFile, {
+      APP_URL: 'http://x.test',
+      INGEST_API_KEY: `k-${Date.now()}`,
+    })
+
+    expect(result.status).toBe(0)
+    expect(await waitForArgsFile(argsFile)).toBe(true)
+
+    const lines = readFileSync(argsFile, 'utf8').split('\n')
+    const body = JSON.parse(argValueAfter(lines, '-d') as string) as Record<string, unknown>
+    expect(body.reset_at).toBeTruthy()
+    expect('reset_7d_at' in body).toBe(false)
+  })
+
   it('T2: stays silent (exit 0, no output, no request) when quota or env is missing', async () => {
     const { dir, argsFile } = makeTempDirWithFakeCurl()
 

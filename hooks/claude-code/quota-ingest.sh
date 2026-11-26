@@ -69,6 +69,9 @@ payload=$(jq -nc \
   | if ($s.rate_limits.five_hour.resets_at | type) == "number"
     then . + {reset_at: ($s.rate_limits.five_hour.resets_at | todate)}
     else . end
+  | if ($s.rate_limits.seven_day.resets_at | type) == "number"
+    then . + {reset_7d_at: ($s.rate_limits.seven_day.resets_at | todate)}
+    else . end
 ' 2>/dev/null) || exit 0
 [ -n "$payload" ] || exit 0
 
