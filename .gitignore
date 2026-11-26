@@ -31,3 +31,8 @@ playwright-report/
 
 .playwright-cli/
 .agents/attachments/
+
+# Supabase CLI local state
+supabase/.temp/
+.vercel
+.env*
