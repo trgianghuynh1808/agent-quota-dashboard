@@ -6,7 +6,7 @@ Guidelines for coding agents working in this repo.
 
 ## Project Overview
 
-`agent-quota-dashboard` is a quota & telemetry dashboard for Claude Code and OpenCode Go, built in phases from `docs/SPEC.md`. Phase 1 is in place: Vite + React + TS + Tailwind + PWA scaffold, Supabase schema, Vercel API routes (`POST /api/ingest`, `GET /api/status`, `POST /api/control`, `POST /api/subscribe`), threshold auto-pause and Web Push. Phase 3a is in place: a sample Claude Code hook (`hooks/claude-code/`) that posts statusline quota to `/api/ingest`. Phase 3b ships the OpenCode Go global plugin (`hooks/opencode/quota-sync.ts`) with a one-time usage backfill. Phase 2 (PWA dashboard) and the macOS guide are not built yet.
+`agent-quota-dashboard` is a quota & telemetry dashboard for Claude Code and OpenCode Go, built in phases from `docs/SPEC.md`. Phase 1 is in place: Vite + React + TS + Tailwind + PWA scaffold, Supabase schema, Vercel API routes (`POST /api/ingest`, `GET /api/status`, `POST /api/control`, `POST /api/subscribe`), threshold auto-pause and Web Push. Phase 3a is in place: a sample Claude Code hook (`hooks/claude-code/`) that posts statusline quota to `/api/ingest`. Phase 3b ships the OpenCode Go global plugin (`hooks/opencode/quota-sync.ts`) with a one-time usage backfill. Phase 2 (PWA dashboard) is not built yet; `README.md` includes a macOS setup guide (Phase 3d).
 - App stack: Vite + React 19 + TypeScript + Tailwind CSS v4 + vite-plugin-pwa; Vercel Node API routes in `api/`; Supabase Postgres + Realtime; Vitest for tests.
 - Tooling stack: bash scripts + one Python 3 helper (`scripts/room-ops.py`); Claude plans/verifies, OpenCode implements.
 
