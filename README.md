@@ -2,7 +2,7 @@
 
 Unified multi-agent quota & telemetry dashboard for **Claude Code** and **OpenCode Go** (see `docs/SPEC.md`).
 
-This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status/control/subscribe, threshold-based auto-pause and Web Push notifications, **Phase 3a**: a sample Claude Code hook that feeds `/api/ingest`, and **Phase 3b**: the OpenCode Go global plugin (`hooks/opencode/quota-sync.ts`) with a one-time usage backfill. **Phase 2** is partially built: the dashboard renders from mock data (quota health cards, Burn Rate & Anomaly Monitor, Active Agents Feed, remote Circuit Breaker controls over a mock control API) and the PWA shell is configured (standalone manifest, dark theme color, service worker handling `push`/`notificationclick`); Supabase Realtime wiring and push subscription registration are still pending. This README ships a [macOS setup guide](#macos-setup-guide-phase-3d).
+This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status/control/subscribe, threshold-based auto-pause and Web Push notifications, **Phase 3a**: a sample Claude Code hook that feeds `/api/ingest`, and **Phase 3b**: the OpenCode Go global plugin (`hooks/opencode/quota-sync.ts`) with a one-time usage backfill. **Phase 2** is partially built: the dashboard renders from mock data (quota health cards, Burn Rate & Anomaly Monitor, Active Agents Feed, remote Circuit Breaker controls over a mock control API) and the PWA shell is configured (standalone manifest, dark theme color, service worker handling `push`/`notificationclick`, plus an iOS/Safari onboarding banner that asks for notification permission only once the app is installed and the user clicks "Bật thông báo"); Supabase Realtime wiring and push subscription registration are still pending. This README ships a [macOS setup guide](#macos-setup-guide-phase-3d).
 
 ## Stack
 
@@ -33,9 +33,9 @@ public/
   icon.svg             app icon (used as the PWA `any` + `maskable` icon)
   push-sw.js           service worker `push`/`notificationclick` handlers (imported into the generated sw.js)
 src/
-  App.tsx              bento grid: quota cards, burn rate monitor, circuit breaker controls, agents feed
-  components/          QuotaHealthCards, BurnRateMonitor, CircuitBreakerControls, ActiveAgentsFeed
-  lib/                 pure helpers (quota, quota-cards, anomaly, burn-rate, circuit-breaker) + control-api (ControlApi + in-memory mock)
+  App.tsx              bento grid: push onboarding banner, quota cards, burn rate monitor, circuit breaker controls, agents feed
+  components/          PushOnboardingBanner, QuotaHealthCards, BurnRateMonitor, CircuitBreakerControls, ActiveAgentsFeed
+  lib/                 pure helpers (quota, quota-cards, anomaly, burn-rate, circuit-breaker, push-onboarding) + control-api (ControlApi + in-memory mock)
   mock/                mockSnapshots, mockTurns (mock data until Phase 2 Realtime)
   hooks/useNow.ts      re-rendering clock used by the dashboard
 hooks/claude-code/     Claude Code hook: quota-ingest.sh + settings.example.json
@@ -53,8 +53,9 @@ scripts/               agent-room tooling (plan/handoff/verify)
 - **Burn Rate & Anomaly Monitor** (`components/BurnRateMonitor.tsx`) — TPM, time-to-limit for the OpenCode Go cycle (Claude shows `--`), and a red loop badge per agent detected by `detectLoops`.
 - **Circuit Breaker Controls** (`components/CircuitBreakerControls.tsx`) — RUNNING/PAUSED toggle plus warning and auto-pause thresholds (defaults 80 and 90). Thresholds are validated client-side with the same rule as `/api/control` (integers `1`–`100`, warning ≤ auto-pause). It talks to a `ControlApi`; for now `App.tsx` wires the in-memory `createMockControlApi()` from `lib/control-api.ts`, so no request hits `/api/control` yet.
 - **Active Agents Feed** (`components/ActiveAgentsFeed.tsx`) — the most recent turns (agent, model, task, tokens, cache ratio, age).
+- **Push onboarding banner** (`components/PushOnboardingBanner.tsx`) — on iOS Safari without the standalone display mode it shows the "Share → Add to Home Screen → open from Home Screen" steps instead of asking for notifications; otherwise, when permission is `default`, it shows a "Bật thông báo" button that calls `Notification.requestPermission()` only on click. Dismissing stores `localStorage['push-onboarding-dismissed']`, and the state rules live in `lib/push-onboarding.ts`.
 
-The pure logic lives in `src/lib/` (`quota.ts`, `quota-cards.ts`, `anomaly.ts`, `burn-rate.ts`, `circuit-breaker.ts`, `control-api.ts`); the quota/burn-rate helpers take `now` as a parameter, and the module is covered by Vitest.
+The pure logic lives in `src/lib/` (`quota.ts`, `quota-cards.ts`, `anomaly.ts`, `burn-rate.ts`, `circuit-breaker.ts`, `push-onboarding.ts`, `control-api.ts`); the quota/burn-rate helpers take `now` as a parameter, and the module is covered by Vitest.
 
 ## PWA
 
@@ -63,8 +64,9 @@ The pure logic lives in `src/lib/` (`quota.ts`, `quota-cards.ts`, `anomaly.ts`, 
 - **Manifest** — `id`/`scope`/`start_url` `/`, `display: 'standalone'`, `theme_color` and `background_color` `#0f172a` (matches the dark dashboard), and the same `public/icon.svg` declared once as `purpose: 'any'` and once as `purpose: 'maskable'`. `index.html` also has `<meta name="theme-color" content="#0f172a">`.
 - **Service worker** — the generated `sw.js` imports `public/push-sw.js` via `workbox.importScripts`. That script listens for `push` (shows a notification from the server payload `{ title, body }`, falling back to `Agent Quota Dashboard` / empty body when the payload is missing or invalid) and `notificationclick` (closes the notification, focuses an open window or opens `/`).
 - **Registration** — `src/main.tsx` calls `registerSW({ immediate: true })` from `virtual:pwa-register` in production builds only.
+- **Onboarding** — `components/PushOnboardingBanner.tsx` decides between `install` (iOS Safari, not standalone), `enable` (permission `default` and allowed to ask) and `hidden` (dismissed, already granted/denied, unsupported, or already installed on desktop via `lib/push-onboarding.ts`). It never calls `Notification.requestPermission()` on page load, only when the user clicks "Bật thông báo".
 
-Push **subscription** registration (asking for permission and calling `POST /api/subscribe`) is still pending.
+Push **subscription** registration (calling `POST /api/subscribe`) is still pending; the banner only requests notification permission.
 
 ## Environment variables
 
@@ -430,6 +432,6 @@ npx vitest run tests/api.test.ts   # run only the API spec
 
 ## Not implemented yet
 
-- **Phase 2 (PWA frontend):** the dashboard UI renders from mock data; Supabase Realtime subscriptions, live data, and push subscription registration (`POST /api/subscribe`) are still pending. The service worker already handles incoming `push`/`notificationclick` and the manifest is configured. The Circuit Breaker Controls use the in-memory mock `ControlApi`, not `POST /api/control` yet.
+- **Phase 2 (PWA frontend):** the dashboard UI renders from mock data; Supabase Realtime subscriptions, live data, and push subscription registration (`POST /api/subscribe`) are still pending. The service worker already handles incoming `push`/`notificationclick`, the manifest is configured, and the onboarding banner covers install/permission UX (it does not subscribe). The Circuit Breaker Controls use the in-memory mock `ControlApi`, not `POST /api/control` yet.
 - **Phase 3 (host hooks):** the Claude Code hook (`hooks/claude-code/`) and the OpenCode Go plugin (`hooks/opencode/`) are implemented; install steps are in [macOS setup guide](#macos-setup-guide-phase-3d).
 - **Phase 3c:** circuit breaker / follow-up work on top of the host hooks.

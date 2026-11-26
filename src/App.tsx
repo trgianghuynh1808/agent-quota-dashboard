@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { ActiveAgentsFeed } from './components/ActiveAgentsFeed.js'
 import { BurnRateMonitor } from './components/BurnRateMonitor.js'
 import { CircuitBreakerControls } from './components/CircuitBreakerControls.js'
+import { PushOnboardingBanner } from './components/PushOnboardingBanner.js'
 import { QuotaHealthCards } from './components/QuotaHealthCards.js'
 import { useNow } from './hooks/useNow.js'
 import { createMockControlApi } from './lib/control-api.js'
@@ -16,6 +17,7 @@ export default function App() {
 
   return (
     <main className="grid grid-cols-1 gap-4 p-4 md:grid-cols-3">
+      <PushOnboardingBanner />
       <QuotaHealthCards snapshots={snapshots} now={now} />
       <BurnRateMonitor turns={turns} snapshots={snapshots} now={now} />
       <CircuitBreakerControls api={controlApi} />
