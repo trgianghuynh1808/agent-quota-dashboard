@@ -1,4 +1,11 @@
-import type { Control, GlobalStatus, LogEntry, Provider, QuotaSnapshot } from '../../api/_lib/types.js'
+import type {
+  Control,
+  GlobalStatus,
+  LogEntry,
+  OpencodeWindow,
+  Provider,
+  QuotaSnapshot,
+} from '../../api/_lib/types.js'
 import type { FeedTurn } from './burn-rate.js'
 
 export interface LiveSourceHandlers {
@@ -23,6 +30,7 @@ export interface SnapshotRow {
   reset_at: string | null
   reset_7d_at?: string | null
   updated_at: string | null
+  opencode_windows?: unknown
 }
 
 export interface TurnRow {
@@ -70,7 +78,22 @@ function toGlobalStatus(value: string | null | undefined): GlobalStatus {
   return value === 'paused' ? 'paused' : 'running'
 }
 
+function toOpencodeWindows(value: unknown): OpencodeWindow[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const windows: OpencodeWindow[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
+    const record = item as Record<string, unknown>
+    if (record.id !== '5h' && record.id !== '7d' && record.id !== '30d') continue
+    if (typeof record.percent !== 'number') continue
+    if (typeof record.reset_at !== 'string') continue
+    windows.push({ id: record.id, percent: record.percent, reset_at: record.reset_at })
+  }
+  return windows.length > 0 ? windows : undefined
+}
+
 export function rowToSnapshot(row: SnapshotRow): QuotaSnapshot {
+  const opencodeWindows = toOpencodeWindows(row.opencode_windows)
   return {
     provider: toProvider(row.provider),
     window_5h_percent: toNumberOrNull(row.window_5h_percent),
@@ -80,6 +103,7 @@ export function rowToSnapshot(row: SnapshotRow): QuotaSnapshot {
     reset_at: toTextOrNull(row.reset_at),
     reset_7d_at: toTextOrNull(row.reset_7d_at),
     updated_at: toText(row.updated_at),
+    ...(opencodeWindows !== undefined ? { opencode_windows: opencodeWindows } : {}),
   }
 }
 

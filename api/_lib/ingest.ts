@@ -17,6 +17,10 @@ function usagePercent(payload: IngestPayload, snapshot: QuotaSnapshot): number |
     return Math.max(snapshot.window_5h_percent ?? 0, snapshot.window_7d_percent ?? 0)
   }
 
+  if (snapshot.opencode_windows && snapshot.opencode_windows.length > 0) {
+    return Math.max(...snapshot.opencode_windows.map((w) => w.percent))
+  }
+
   const limit = snapshot.cycle_token_limit
   if (limit === null || limit <= 0) return null
   return (snapshot.cycle_tokens_used / limit) * 100
@@ -27,20 +31,34 @@ export async function processIngest(
   payload: IngestPayload,
   notify: Notify,
 ): Promise<IngestResult> {
-  await db.insertLog({
-    provider: payload.provider,
-    agent_id: payload.agent_id,
-    task_name: payload.task_name,
-    model: payload.model,
-    input_tokens: payload.input_tokens,
-    output_tokens: payload.output_tokens,
-    cache_read_tokens: payload.cache_read_tokens,
-  })
+  let snapshot: QuotaSnapshot
+  if (
+    payload.provider === 'opencode_go' &&
+    payload.window_id !== undefined &&
+    payload.window_percent !== undefined &&
+    payload.reset_at !== undefined
+  ) {
+    snapshot = await db.setOpencodeWindow({
+      id: payload.window_id,
+      percent: payload.window_percent,
+      reset_at: payload.reset_at,
+    })
+  } else {
+    await db.insertLog({
+      provider: payload.provider,
+      agent_id: payload.agent_id,
+      task_name: payload.task_name,
+      model: payload.model,
+      input_tokens: payload.input_tokens,
+      output_tokens: payload.output_tokens,
+      cache_read_tokens: payload.cache_read_tokens,
+    })
 
-  const snapshot =
-    payload.provider === 'claude_code'
-      ? await db.upsertClaudeSnapshot(payload)
-      : await db.incrementOpencode(payload.delta_tokens, payload.cycle_token_limit, payload.reset_at)
+    snapshot =
+      payload.provider === 'claude_code'
+        ? await db.upsertClaudeSnapshot(payload)
+        : await db.incrementOpencode(payload.delta_tokens, payload.cycle_token_limit, payload.reset_at)
+  }
 
   const control = await db.getControl()
   const pct = usagePercent(payload, snapshot)

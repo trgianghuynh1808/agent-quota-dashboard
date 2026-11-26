@@ -234,6 +234,89 @@ describe('T4: claude reset_7d_at', () => {
   })
 })
 
+describe('T22: opencode quota windows', () => {
+  it('T1: window_id được validate, lưu vào snapshot, không ghi log, không đụng token', async () => {
+    const db = new FakeDb()
+    const notify = vi.fn<Notify>().mockResolvedValue(undefined)
+    const ingest = makeIngest(db, notify)
+    const reset5h = '2026-12-01T00:00:00.000Z'
+    const reset7d = '2026-12-05T00:00:00.000Z'
+
+    const first = await call(ingest, {
+      headers: AUTH,
+      body: {
+        provider: 'opencode_go',
+        agent_id: 'a',
+        window_id: '5h',
+        window_percent: 35,
+        reset_at: reset5h,
+      },
+    })
+    expect(first.statusCode).toBe(200)
+
+    const second = await call(ingest, {
+      headers: AUTH,
+      body: {
+        provider: 'opencode_go',
+        agent_id: 'a',
+        window_id: '7d',
+        window_percent: 58,
+        reset_at: reset7d,
+      },
+    })
+    expect(second.statusCode).toBe(200)
+
+    const third = await call(ingest, {
+      headers: AUTH,
+      body: {
+        provider: 'opencode_go',
+        agent_id: 'a',
+        window_id: '5h',
+        window_percent: 40,
+        reset_at: reset5h,
+      },
+    })
+    expect(third.statusCode).toBe(200)
+
+    const badWindowId = await call(ingest, {
+      headers: AUTH,
+      body: {
+        provider: 'opencode_go',
+        agent_id: 'a',
+        window_id: '1h',
+        window_percent: 10,
+        reset_at: reset5h,
+      },
+    })
+    expect(badWindowId.statusCode).toBe(400)
+
+    const missingPercent = await call(ingest, {
+      headers: AUTH,
+      body: {
+        provider: 'opencode_go',
+        agent_id: 'a',
+        window_id: '5h',
+        reset_at: reset5h,
+      },
+    })
+    expect(missingPercent.statusCode).toBe(400)
+
+    expect(db.logs.length).toBe(0)
+    expect(notify).not.toHaveBeenCalled()
+
+    const opencode = findByProvider(await db.listSnapshots(), 'opencode_go')
+    expect(opencode?.cycle_tokens_used).toBe(0)
+    expect(opencode?.opencode_windows).toHaveLength(2)
+    const windows = opencode?.opencode_windows ?? []
+    const five = windows.find((w) => w.id === '5h')
+    expect(five?.percent).toBe(40)
+    expect(five?.reset_at).toBe(reset5h)
+    const seven = windows.find((w) => w.id === '7d')
+    expect(seven?.percent).toBe(58)
+    expect(seven?.reset_at).toBe(reset7d)
+  })
+})
+
 describe('POST /api/control', () => {
   it('T1: applies partial updates and keeps fields not sent', async () => {
     const db = new FakeDb()

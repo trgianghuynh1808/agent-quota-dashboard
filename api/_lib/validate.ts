@@ -170,6 +170,32 @@ export function parseIngestPayload(body: unknown): ParseResult {
     return { ok: true, value }
   }
 
+  const windowId = data.window_id
+  if (windowId !== undefined && windowId !== '5h' && windowId !== '7d' && windowId !== '30d') {
+    return { ok: false, error: 'window_id must be 5h, 7d or 30d' }
+  }
+
+  if (windowId !== undefined) {
+    if (data.window_percent === undefined) {
+      return { ok: false, error: 'window_percent is required when window_id is set' }
+    }
+    if (!isPercent(data.window_percent)) {
+      return { ok: false, error: 'window_percent must be a number between 0 and 100' }
+    }
+    if (resetAt === undefined) {
+      return { ok: false, error: 'reset_at is required when window_id is set' }
+    }
+
+    const value: OpencodeGoIngest = {
+      ...base,
+      provider: 'opencode_go',
+      delta_tokens: 0,
+      window_id: windowId,
+      window_percent: data.window_percent,
+    }
+    return { ok: true, value }
+  }
+
   const deltaTokens = data.delta_tokens
   if (typeof deltaTokens !== 'number' || !Number.isInteger(deltaTokens) || deltaTokens < 0) {
     return { ok: false, error: 'delta_tokens must be a non-negative integer' }

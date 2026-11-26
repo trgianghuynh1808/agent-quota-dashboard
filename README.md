@@ -29,6 +29,7 @@ api/
     validate.ts        manual payload validation
 hooks/opencode/
   quota-sync.ts        OpenCode Go global plugin (message deltas + one-time backfill)
+  set-quota.sh         manual helper: record a real 5h/7d/30d window read from the console
 public/
   icon.svg             app icon (used as the PWA `any` + `maskable` icon)
   push-sw.js           service worker `push`/`notificationclick` handlers (imported into the generated sw.js)
@@ -39,7 +40,7 @@ src/
   mock/                mockSnapshots, mockTurns (used when the Supabase client env is missing)
   hooks/               useNow (re-rendering clock), useLiveData (fetch + Realtime state, mock fallback)
 hooks/claude-code/     Claude Code hook: quota-ingest.sh + settings.example.json
-supabase/migrations/   SQL migrations (0001_init.sql = Phase 1 schema, 0002_realtime_read_policies.sql = Realtime read policies, 0003_claude_reset_7d.sql = Claude 7d reset column)
+supabase/migrations/   SQL migrations (0001_init.sql = Phase 1 schema, 0002_realtime_read_policies.sql = Realtime read policies, 0003_claude_reset_7d.sql = Claude 7d reset column, 0004_opencode_windows.sql = OpenCode Go 5h/7d/30d windows)
 tests/                 Vitest specs and the in-memory FakeDb
 docs/SPEC.md           product specification
 scripts/               agent-room tooling (plan/handoff/verify)
@@ -49,8 +50,8 @@ scripts/               agent-room tooling (plan/handoff/verify)
 
 `npm run dev` serves a Bento grid. With `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` set it reads the real data: an initial fetch of `quota_snapshots`, the latest 200 `agent_telemetry_logs` and `orchestrator_control`, then a single Supabase Realtime `postgres_changes` channel that updates the cards, feed and control state (`lib/supabase-source.ts` + `hooks/useLiveData.ts`). Without the env vars it keeps using `src/mock/snapshots.ts` and `src/mock/turns.ts`; `<main data-testid="data-source" data-mode="live|mock">` shows which mode is active. There is no automatic fallback to mock when a live fetch fails — only a missing env switches to mock.
 
-- **Quota card** (`components/QuotaHealthCards.tsx`) — one grouped card with a section per provider (Claude Code, then OpenCode Go); each section lists its window rows with usage percent, progress bar and reset countdown (`groupQuotaBars` in `lib/quota-cards.ts`).
-- **Burn Rate & Anomaly Monitor** (`components/BurnRateMonitor.tsx`) — TPM, time-to-limit for the OpenCode Go cycle (Claude shows `--`), and a red loop badge per agent detected by `detectLoops`.
+- **Quota card** (`components/QuotaHealthCards.tsx`) — one grouped card with a section per provider (Claude Code, then OpenCode Go); each section lists its window rows with usage percent, progress bar and reset countdown (`groupQuotaBars` in `lib/quota-cards.ts`). OpenCode Go always shows three rows — 5h, 7d and 30d — read from `quota_snapshots.opencode_windows` (written by `hooks/opencode/set-quota.sh`); a window that has not been entered yet shows `--` for both the percent and the reset countdown. There is no estimated "cycle" row anymore.
+- **Burn Rate & Anomaly Monitor** (`components/BurnRateMonitor.tsx`) — TPM, time-to-limit for the OpenCode Go cycle when `cycle_token_limit` is set (Claude, or a snapshot without a cycle limit, shows `--`), and a red loop badge per agent detected by `detectLoops`.
 - **Circuit Breaker Controls** (`components/CircuitBreakerControls.tsx`) — RUNNING/PAUSED display plus warning and auto-pause thresholds (defaults 80 and 90). Thresholds are validated client-side with the same rule as `/api/control` (integers `1`–`100`, warning ≤ auto-pause). It talks to a `ControlApi`; in live mode `App.tsx` uses `createReadOnlyControlApi` so the control row comes from Supabase (and Realtime updates re-key the panel), and the "Lưu" button rejects with "Chưa nối /api/control". With mock data it uses `createMockControlApi()`.
 - **Active Agents Feed** (`components/ActiveAgentsFeed.tsx`) — the most recent turns (agent, model, task, tokens, cache ratio, age).
 - **Push onboarding banner** (`components/PushOnboardingBanner.tsx`) — on iOS Safari without the standalone display mode it shows the "Share → Add to Home Screen → open from Home Screen" steps instead of asking for notifications; otherwise, when permission is `default`, it shows a "Bật thông báo" button that calls `Notification.requestPermission()` only on click. Dismissing stores `localStorage['push-onboarding-dismissed']`, and the state rules live in `lib/push-onboarding.ts`.
@@ -98,11 +99,11 @@ Apply the migrations with the Supabase CLI:
 supabase db push
 ```
 
-Or paste `supabase/migrations/0001_init.sql`, `0002_realtime_read_policies.sql` and `0003_claude_reset_7d.sql` into the Supabase SQL editor.
+Or paste `supabase/migrations/0001_init.sql`, `0002_realtime_read_policies.sql`, `0003_claude_reset_7d.sql` and `0004_opencode_windows.sql` into the Supabase SQL editor.
 
 It creates:
 
-- `quota_snapshots` — current quota per provider (`claude_code`, `opencode_go`). `reset_at` is the 5h window reset (also used by OpenCode Go); `reset_7d_at` (added by `0003`) is the Claude 7d window reset.
+- `quota_snapshots` — current quota per provider (`claude_code`, `opencode_go`). `reset_at` is the 5h window reset (also used by OpenCode Go); `reset_7d_at` (added by `0003`) is the Claude 7d window reset; `opencode_windows` (added by `0004`) is a jsonb array of the real OpenCode Go windows `[{ id: "5h"|"7d"|"30d", percent, reset_at }]` typed from the console via `hooks/opencode/set-quota.sh`.
 - `agent_telemetry_logs` — per-turn telemetry history, indexed by `created_at` and `(agent_id, created_at)`.
 - `orchestrator_control` — single row (`id = 1`) holding `global_status`, `auto_pause_threshold` (default 90) and `downgrade_model_threshold` (default 80).
 - `push_subscriptions` — Web Push subscriptions (extra table beyond the SPEC's three, needed for push).
@@ -135,8 +136,11 @@ Common fields:
 
 `opencode_go` additional fields:
 
-- `delta_tokens` — non-negative integer (required)
+- `delta_tokens` — non-negative integer (required for a token delta; not needed when `window_id` is set)
 - `cycle_token_limit` — positive integer (optional)
+- `window_id` — `5h` | `7d` | `30d` (optional). Records a real quota window read from the OpenCode Go console instead of adding tokens.
+- `window_percent` — number `0..100` (required when `window_id` is set)
+- `reset_at` — ISO date string, required when `window_id` is set; it is the reset of that specific window
 
 Successful response (`200`):
 
@@ -144,7 +148,7 @@ Successful response (`200`):
 { "ok": true, "global_status": "running", "paused_now": false }
 ```
 
-Behavior: inserts a telemetry log, then upserts (Claude, absolute values) or atomically increments (OpenCode) the snapshot. The usage percentage is `max(window_5h_percent, window_7d_percent)` for Claude and `cycle_tokens_used / cycle_token_limit * 100` for OpenCode (skipped when the limit is missing). When the control row is `running` and the percentage reaches `auto_pause_threshold`, the status flips to `paused`, one Web Push notification is sent (`title: "Quota auto-pause"`), and the response has `paused_now: true`. Notification failures are logged and never fail the ingest.
+Behavior: for a normal payload it inserts a telemetry log, then upserts (Claude, absolute values) or atomically increments (OpenCode) the snapshot. When an `opencode_go` payload carries `window_id`, it instead updates `quota_snapshots.opencode_windows` (upsert of that window by `id`, other windows and cycle fields untouched) and does **not** insert a log or touch the token counters. The usage percentage is `max(window_5h_percent, window_7d_percent)` for Claude and `max(opencode_windows[].percent)` for OpenCode when windows exist; otherwise `cycle_tokens_used / cycle_token_limit * 100` (skipped when the limit is missing). When the control row is `running` and the percentage reaches `auto_pause_threshold`, the status flips to `paused`, one Web Push notification is sent (`title: "Quota auto-pause"`), and the response has `paused_now: true`. Notification failures are logged and never fail the ingest.
 
 Claude Code example:
 
@@ -178,6 +182,21 @@ curl -X POST "$APP_URL/api/ingest" \
     "agent_id": "opencode-1",
     "delta_tokens": 3500,
     "cycle_token_limit": 500000
+  }'
+```
+
+OpenCode Go window example (no token delta, no telemetry log):
+
+```bash
+curl -X POST "$APP_URL/api/ingest" \
+  -H "Authorization: Bearer $INGEST_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "opencode_go",
+    "agent_id": "opencode-console",
+    "window_id": "7d",
+    "window_percent": 58,
+    "reset_at": "2026-12-01T00:00:00Z"
   }'
 ```
 
@@ -326,6 +345,24 @@ Plugin environment variables (read from `process.env`, separate from the server-
 | `OPENCODE_CYCLE_TOKEN_LIMIT` | If set, sent as `cycle_token_limit` so the API can compute the usage percentage. Optional. |
 | `OPENCODE_CYCLE_DAYS` | Backfill window in days (default `30`). Optional. |
 
+## OpenCode Go quota windows (`set-quota.sh`)
+
+The OpenCode Go console shows three quota windows (5h, 7d, 30d) that the plugin cannot read automatically. `hooks/opencode/set-quota.sh` lets you type them in; each call posts one window to `/api/ingest` and the dashboard then shows the real percent and reset for that row.
+
+```bash
+hooks/opencode/set-quota.sh <5h|7d|30d> <percent 0..100> <reset_iso>
+# example: 58% used on the 7-day window, resetting 2026-12-01T00:00:00Z
+hooks/opencode/set-quota.sh 7d 58 2026-12-01T00:00:00Z
+```
+
+It sends `{ provider: "opencode_go", agent_id, window_id, window_percent, reset_at }` with `AGENT_ID` (default `opencode-console`), so the token counters and telemetry log are untouched and only that window is updated. Unlike the hooks it runs synchronously and prints `ok` or the server error.
+
+- Bad arguments (window not `5h`/`7d`/`30d`, percent not a number `0..100`, missing reset) → usage on stderr, exit `2`.
+- Missing `APP_URL`/`INGEST_API_KEY`, `jq` or `curl` → warning on stderr, exit `0`.
+- Network error or non-2xx response → exit `1`.
+
+Requirements: `bash`, `jq` and `curl` on `PATH`, plus the `0004` migration applied to Supabase.
+
 ## macOS setup guide (Phase 3d)
 
 End-to-end install on a Mac: deploy the backend, wire the Claude Code hook and the OpenCode Go plugin, then verify. Run every command from the repo root unless noted.
@@ -351,7 +388,7 @@ supabase link --project-ref <your-project-ref>
 supabase db push
 ```
 
-This applies `supabase/migrations/0001_init.sql`, `0002_realtime_read_policies.sql` and `0003_claude_reset_7d.sql` (see [Database](#database)). Copy the project URL and the **service role** key from Project Settings → API; they become `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+This applies `supabase/migrations/0001_init.sql`, `0002_realtime_read_policies.sql`, `0003_claude_reset_7d.sql` and `0004_opencode_windows.sql` (see [Database](#database)). Copy the project URL and the **service role** key from Project Settings → API; they become `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 
 ### 3. Deploy to Vercel and set environment variables
 
@@ -421,6 +458,16 @@ curl "$APP_URL/api/status" -H "Authorization: Bearer $INGEST_API_KEY"
 ```
 
 `/api/status` should show a `claude_code` snapshot with `window_5h_percent: 12.5` and `window_7d_percent: 40`. A `401` means `INGEST_API_KEY` differs between the client shell and Vercel; an empty `snapshots` array usually means `APP_URL`/`INGEST_API_KEY` were not exported in the shell that ran the hook.
+
+Record the OpenCode Go windows shown in the console (repeat for `5h`, `7d` and `30d`, each with its own reset time):
+
+```bash
+hooks/opencode/set-quota.sh 5h 35 2026-11-26T03:00:00Z
+hooks/opencode/set-quota.sh 7d 58 2026-12-01T00:00:00Z
+hooks/opencode/set-quota.sh 30d 41 2026-12-25T00:00:00Z
+```
+
+Each successful call prints `ok: <window> <percent>% (reset <iso>)` and the OpenCode Go section of the dashboard shows the three rows with those values; rows you have not entered yet show `--`.
 
 ### 8. Troubleshooting
 

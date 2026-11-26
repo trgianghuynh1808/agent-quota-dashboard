@@ -5,6 +5,7 @@ import type {
   ControlPatch,
   Db,
   LogEntry,
+  OpencodeWindow,
   PushSubscriptionInput,
   QuotaSnapshot,
 } from './types.js'
@@ -33,6 +34,9 @@ function toSnapshot(row: Record<string, unknown>): QuotaSnapshot {
     reset_at: row.reset_at == null ? null : String(row.reset_at),
     reset_7d_at: row.reset_7d_at == null ? null : String(row.reset_7d_at),
     updated_at: row.updated_at == null ? new Date().toISOString() : String(row.updated_at),
+    opencode_windows: Array.isArray(row.opencode_windows)
+      ? (row.opencode_windows as OpencodeWindow[])
+      : undefined,
   }
 }
 
@@ -84,6 +88,33 @@ export function createSupabaseDb(): Db {
       if (error) throw new Error(`incrementOpencode failed: ${error.message}`)
       const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown>
       return toSnapshot(row)
+    },
+
+    async setOpencodeWindow(window: OpencodeWindow): Promise<QuotaSnapshot> {
+      const { data: existing, error: selectError } = await client
+        .from('quota_snapshots')
+        .select('opencode_windows')
+        .eq('provider', 'opencode_go')
+        .maybeSingle()
+      if (selectError) throw new Error(`setOpencodeWindow failed: ${selectError.message}`)
+
+      const previous = (existing ?? {}) as Record<string, unknown>
+      const previousWindows = Array.isArray(previous.opencode_windows)
+        ? (previous.opencode_windows as OpencodeWindow[])
+        : []
+      const windows = [...previousWindows.filter((w) => w.id !== window.id), window]
+
+      const { data, error } = await client
+        .from('quota_snapshots')
+        .upsert({
+          provider: 'opencode_go',
+          opencode_windows: windows,
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single()
+      if (error) throw new Error(`setOpencodeWindow failed: ${error.message}`)
+      return toSnapshot(data as Record<string, unknown>)
     },
 
     async getControl(): Promise<Control> {

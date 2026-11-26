@@ -23,6 +23,8 @@ export interface OpencodeGoIngest extends IngestBase {
   provider: 'opencode_go'
   delta_tokens: number
   cycle_token_limit?: number
+  window_id?: OpencodeWindow['id']
+  window_percent?: number
 }
 
 export type IngestPayload = ClaudeCodeIngest | OpencodeGoIngest
@@ -78,6 +80,7 @@ export interface Db {
     cycleTokenLimit?: number | null,
     resetAt?: string | null,
   ): Promise<QuotaSnapshot>
+  setOpencodeWindow(window: OpencodeWindow): Promise<QuotaSnapshot>
   getControl(): Promise<Control>
   setPaused(): Promise<void>
   updateControl(patch: ControlPatch): Promise<Control>

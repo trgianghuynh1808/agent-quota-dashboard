@@ -4,6 +4,7 @@ import type {
   ControlPatch,
   Db,
   LogEntry,
+  OpencodeWindow,
   Provider,
   PushSubscriptionInput,
   QuotaSnapshot,
@@ -63,6 +64,25 @@ export class FakeDb implements Db {
         cycleTokenLimit == null ? (previous?.cycle_token_limit ?? null) : cycleTokenLimit,
       reset_at: resetAt ?? previous?.reset_at ?? null,
       updated_at: new Date().toISOString(),
+    }
+    this.snapshots.set('opencode_go', snapshot)
+    return snapshot
+  }
+
+  async setOpencodeWindow(window: OpencodeWindow): Promise<QuotaSnapshot> {
+    const previous = this.snapshots.get('opencode_go')
+    const previousWindows = previous?.opencode_windows ?? []
+    const windows = [...previousWindows.filter((w) => w.id !== window.id), window]
+    const snapshot: QuotaSnapshot = {
+      provider: 'opencode_go',
+      window_5h_percent: previous?.window_5h_percent ?? null,
+      window_7d_percent: previous?.window_7d_percent ?? null,
+      cycle_tokens_used: previous?.cycle_tokens_used ?? 0,
+      cycle_token_limit: previous?.cycle_token_limit ?? null,
+      reset_at: previous?.reset_at ?? null,
+      reset_7d_at: previous?.reset_7d_at ?? null,
+      updated_at: new Date().toISOString(),
+      opencode_windows: windows,
     }
     this.snapshots.set('opencode_go', snapshot)
     return snapshot
