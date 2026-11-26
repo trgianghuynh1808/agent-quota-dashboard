@@ -1,0 +1,19 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/hooks/quota-ingest.sh"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/quota-ingest.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

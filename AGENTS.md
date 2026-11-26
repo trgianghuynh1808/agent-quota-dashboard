@@ -6,7 +6,7 @@ Guidelines for coding agents working in this repo.
 
 ## Project Overview
 
-`agent-quota-dashboard` is a quota & telemetry dashboard for Claude Code and OpenCode Go, built in phases from `docs/SPEC.md`. Phase 1 is in place: Vite + React + TS + Tailwind + PWA scaffold, Supabase schema, Vercel API routes (`POST /api/ingest`, `GET /api/status`, `POST /api/control`, `POST /api/subscribe`), threshold auto-pause and Web Push. Phase 2 (PWA dashboard) and Phase 3 (host hooks) are not built yet.
+`agent-quota-dashboard` is a quota & telemetry dashboard for Claude Code and OpenCode Go, built in phases from `docs/SPEC.md`. Phase 1 is in place: Vite + React + TS + Tailwind + PWA scaffold, Supabase schema, Vercel API routes (`POST /api/ingest`, `GET /api/status`, `POST /api/control`, `POST /api/subscribe`), threshold auto-pause and Web Push. Phase 3a is in place: a sample Claude Code hook (`hooks/claude-code/`) that posts statusline quota to `/api/ingest`. Phase 2 (PWA dashboard) and the rest of Phase 3 (OpenCode Go plugin, macOS guide) are not built yet.
 - App stack: Vite + React 19 + TypeScript + Tailwind CSS v4 + vite-plugin-pwa; Vercel Node API routes in `api/`; Supabase Postgres + Realtime; Vitest for tests.
 - Tooling stack: bash scripts + one Python 3 helper (`scripts/room-ops.py`); Claude plans/verifies, OpenCode implements.
 
@@ -15,6 +15,7 @@ Guidelines for coding agents working in this repo.
 - App architecture: the API handlers (`api/ingest.ts`, `api/status.ts`, `api/control.ts`, `api/subscribe.ts`) build real dependencies lazily via `createSupabaseDb()` / `createPushNotifier()`; business logic lives in `api/_lib/` behind the injected `Db` + `notify` interfaces, so tests use an in-memory `FakeDb`. `quota_snapshots` stores the current quota (`claude_code` absolute upsert, `opencode_go` atomic increment through the RPC `increment_opencode_usage`), `agent_telemetry_logs` stores per-turn history, `orchestrator_control` holds the single control row, and `push_subscriptions` stores Web Push subscriptions. All tables enable RLS; `0001` adds no policies, `0002` adds `select` policies for `anon`/`authenticated` on `quota_snapshots`, `agent_telemetry_logs` and `orchestrator_control` for Realtime, so otherwise only the service role (server) can access them (`push_subscriptions` stays service-role only).
 - App dev URL: the config default is `http://localhost:5173` (`DEFAULT_VERIFY_URL` in `.agents/config.sh`); the Vite dev server serves the placeholder page there. In a room, `APP_PORT` / `PLAYWRIGHT_BASE_URL` come from `.agents/room.env`.
 - Agent tooling: Claude hands tasks to OpenCode through files. `scripts/handoff.sh` writes a job to `.agents/queue/`, `scripts/watch-tasks.sh` picks it up and runs `scripts/run-task.sh`, and status goes to `.agents/status/<task>.status` (`queued` -> `running` -> `done` | `stuck`), which `scripts/wait-task.sh` polls.
+- Claude Code hook: `hooks/claude-code/quota-ingest.sh` reads the statusline JSON on stdin, builds a `claude_code` payload with `jq` and POSTs it fire-and-forget (`curl ... &`) to `$APP_URL/api/ingest` with `INGEST_API_KEY`. Secrets come from the environment only; missing env/`jq`/`curl`/quota exits `0` silently so the hook never breaks Claude Code. `--once <5h> <7d>` sends a one-off snapshot. Tests run the real script with a fake `curl` on `PATH` (`tests/claude-hook.test.ts`).
 - State lives in files: task plans in `.agents/tasks/`, the multi-room board in `.agents/board.md`, logs in `.agents/run.log`. The runtime paths are gitignored (see `.gitignore`).
 
 ## Codebase Map
@@ -31,6 +32,7 @@ Guidelines for coding agents working in this repo.
 - Main flow: plan on `task/<slug>` -> `handoff.sh` -> `watch-tasks.sh` runs `run-task.sh` -> Verify/review -> squash-merge and ship (see CLAUDE.md).
 - `api/` - Vercel Node API routes: `ingest.ts`, `status.ts`, `control.ts`, `subscribe.ts`, and `_lib/` (`types`, `auth`, `validate`, `ingest`, `supabase-db`, `push`).
 - `src/` - React placeholder app (`App.tsx`, `main.tsx`, `index.css`); the dashboard comes in Phase 2.
+- `hooks/claude-code/` - Claude Code hook (`quota-ingest.sh`: statusline JSON on stdin → fire-and-forget `POST /api/ingest`, plus `--once <5h> <7d>`) and `settings.example.json` (statusLine + Stop hook sample).
 - `supabase/migrations/` - SQL migrations; `0001_init.sql` holds the Phase 1 schema and `increment_opencode_usage`, `0002_realtime_read_policies.sql` adds the Realtime read policies.
 - `tests/` - Vitest specs and the in-memory `FakeDb` (`fake-db.ts`, `api.test.ts`).
 - `docs/SPEC.md` - product spec covering all phases.
@@ -46,6 +48,7 @@ npm run build        # tsc -b && vite build
 npm run typecheck    # tsc -b --noEmit (covers src, api, tests)
 npm run test         # vitest run
 npx vitest run tests/api.test.ts   # run only the API spec
+npx vitest run tests/claude-hook.test.ts   # run only the Claude Code hook spec
 
 # Agent tooling (run from the repo root)
 scripts/agent-room.sh init --topic <ID> --port <PORT> [--name <name>]

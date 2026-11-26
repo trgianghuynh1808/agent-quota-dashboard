@@ -2,7 +2,7 @@
 
 Unified multi-agent quota & telemetry dashboard for **Claude Code** and **OpenCode Go** (see `docs/SPEC.md`).
 
-This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status, threshold-based auto-pause and Web Push notifications. The PWA dashboard (Phase 2) and the host hooks (Phase 3) are **not implemented yet**.
+This repo currently implements **Phase 1 (backend & schema)**: Supabase schema, Vercel API routes for ingest/status, threshold-based auto-pause and Web Push notifications, plus **Phase 3a**: a sample Claude Code hook that feeds `/api/ingest`. The PWA dashboard (Phase 2) and the remaining host hooks (OpenCode Go plugin, macOS setup guide) are **not implemented yet**.
 
 ## Stack
 
@@ -28,6 +28,7 @@ api/
     types.ts           shared types and the Db/notify interfaces
     validate.ts        manual payload validation
 src/                   placeholder React app (Phase 1)
+hooks/claude-code/     Claude Code hook: quota-ingest.sh + settings.example.json
 supabase/migrations/   SQL migrations (0001_init.sql = Phase 1 schema, 0002_realtime_read_policies.sql = Realtime read policies)
 tests/                 Vitest specs and the in-memory FakeDb
 docs/SPEC.md           product specification
@@ -225,6 +226,37 @@ Errors:
 - `405` — method other than `POST`.
 - `500` — database failure.
 
+## Claude Code hook (Phase 3a)
+
+`hooks/claude-code/quota-ingest.sh` reads the Claude Code statusline JSON on stdin, builds a `claude_code` ingest payload and POSTs it to `/api/ingest` fire-and-forget (in the background, `--max-time 5`). It never blocks or breaks Claude Code: missing `APP_URL`/`INGEST_API_KEY`, missing `jq`/`curl`, bad JSON or missing quota fields all exit `0` silently.
+
+Install:
+
+```bash
+# 1. Copy the hook script next to your Claude Code settings
+mkdir -p ~/.claude/hooks
+cp hooks/claude-code/quota-ingest.sh ~/.claude/hooks/quota-ingest.sh
+chmod +x ~/.claude/hooks/quota-ingest.sh
+
+# 2. Merge hooks/claude-code/settings.example.json into ~/.claude/settings.json
+#    (adds a statusLine command and a Stop hook, both pointing at the script)
+
+# 3. Export the env vars in the shell that launches Claude Code
+export APP_URL="https://your-dashboard.example.com"
+export INGEST_API_KEY="your-ingest-key"
+# optional: export AGENT_ID="claude-code-mybox"  (default: claude-code-$(hostname -s))
+```
+
+Requirements: `bash`, `jq` and `curl` on `PATH`. The script reads secrets only from the environment, never from a file.
+
+Send an initial snapshot once (for example after installing), passing the current 5-hour and 7-day usage percentages (`0..100`):
+
+```bash
+~/.claude/hooks/quota-ingest.sh --once 12.5 40
+```
+
+The payload maps `rate_limits.five_hour.used_percentage` → `window_5h_percent`, `rate_limits.seven_day.used_percentage` → `window_7d_percent`, `model.id` → `model`, `session_id` → `task_name`, and `rate_limits.five_hour.resets_at` (epoch seconds) → `reset_at` (ISO). The statusline JSON shape (`rate_limits.*`) is the currently known format; adjust the `jq` filter in the script if your Claude Code version differs.
+
 ## Commands
 
 ```bash
@@ -239,4 +271,4 @@ npx vitest run tests/api.test.ts   # run only the API spec
 ## Not implemented yet
 
 - **Phase 2 (PWA frontend):** dashboard UI, Supabase Realtime subscriptions, and service worker push registration (the `POST /api/subscribe` endpoint is already in place).
-- **Phase 3 (host hooks):** Claude Code `Stop`/`Statusline` hook config, the OpenCode Go global plugin with one-time backfill, and the macOS setup guide.
+- **Phase 3 (host hooks):** the Claude Code hook is implemented in `hooks/claude-code/`; the OpenCode Go global plugin with one-time backfill and the macOS setup guide are still to come.
