@@ -73,4 +73,38 @@ describe('buildQuotaCards', () => {
     const futureBars = buildQuotaCards([notExpired], NOW)
     expect(futureBars[1].level).toBe('warn')
   })
+
+  it('T1: OpenCode Go 3 mốc — percent/level/reset riêng, quá reset về 0%, thiếu windows thì fallback', () => {
+    const claude = claudeSnapshot(62, 91, isoAfter(2 * MS_HOUR))
+    const opencode: QuotaSnapshot = {
+      ...opencodeSnapshot(isoAfter(5 * MS_DAY)),
+      opencode_windows: [
+        { id: '5h', percent: 35, reset_at: isoAfter(3 * MS_HOUR) },
+        { id: '7d', percent: 85, reset_at: isoAfter(4 * MS_DAY) },
+        { id: '30d', percent: 95, reset_at: isoAfter(-1000) },
+      ],
+    }
+
+    const bars = buildQuotaCards([claude, opencode], NOW)
+
+    expect(bars.map((bar) => bar.id)).toEqual([
+      'claude-5h',
+      'claude-7d',
+      'opencode-5h',
+      'opencode-7d',
+      'opencode-30d',
+    ])
+    const opencodeBars = bars.slice(2)
+    expect(opencodeBars.map((bar) => bar.percent)).toEqual([35, 85, 0])
+    expect(opencodeBars.map((bar) => bar.level)).toEqual(['ok', 'warn', 'ok'])
+    expect(opencodeBars[0].resetText).toBe('3h 00m')
+    expect(opencodeBars[1].resetText).toBe('4d 00h')
+
+    const fallbackBars = buildQuotaCards(
+      [claude, opencodeSnapshot(isoAfter(5 * MS_DAY))],
+      NOW,
+    )
+    expect(fallbackBars).toHaveLength(3)
+    expect(fallbackBars[fallbackBars.length - 1].id).toBe('opencode-cycle')
+  })
 })
