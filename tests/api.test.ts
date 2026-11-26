@@ -5,6 +5,7 @@ import type { Notify } from '../api/_lib/ingest.js'
 import type { QuotaSnapshot } from '../api/_lib/types.js'
 import { createControlHandler } from '../api/control.js'
 import { createStatusHandler } from '../api/status.js'
+import { createSubscribeHandler } from '../api/subscribe.js'
 import { FakeDb } from './fake-db.js'
 
 const API_KEY = 'k'
@@ -65,6 +66,10 @@ function makeStatus(db: FakeDb) {
 
 function makeControl(db: FakeDb) {
   return createControlHandler({ db, apiKey: API_KEY })
+}
+
+function makeSubscribe(db: FakeDb) {
+  return createSubscribeHandler({ db, apiKey: API_KEY })
 }
 
 function findByProvider(snapshots: QuotaSnapshot[], provider: string) {
@@ -277,6 +282,56 @@ describe('POST /api/control', () => {
     expect(db.control.global_status).toBe('running')
     expect(db.control.auto_pause_threshold).toBe(90)
     expect(db.control.downgrade_model_threshold).toBe(80)
+  })
+})
+
+describe('subscribe', () => {
+  it('T1: stores and overwrites a subscription by endpoint', async () => {
+    const db = new FakeDb()
+    const subscribe = makeSubscribe(db)
+    const endpoint = `https://push.example/${Date.now()}`
+
+    const first = await call(subscribe, {
+      headers: AUTH,
+      body: { endpoint, keys: { p256dh: 'p1', auth: 'a1' } },
+    })
+    expect(first.statusCode).toBe(200)
+    expect((first.body as { ok: boolean }).ok).toBe(true)
+
+    const second = await call(subscribe, {
+      headers: AUTH,
+      body: { endpoint, keys: { p256dh: 'p2', auth: 'a1' } },
+    })
+    expect(second.statusCode).toBe(200)
+    expect((second.body as { ok: boolean }).ok).toBe(true)
+
+    expect(db.subscriptions.size).toBe(1)
+    expect(db.subscriptions.get(endpoint)?.p256dh).toBe('p2')
+  })
+
+  it('T2: rejects bad auth, method and body without saving', async () => {
+    const db = new FakeDb()
+    const subscribe = makeSubscribe(db)
+    const endpoint = `https://push.example/${Date.now()}`
+
+    const missingAuth = await call(subscribe, {
+      body: { endpoint, keys: { p256dh: 'p1', auth: 'a1' } },
+    })
+    expect(missingAuth.statusCode).toBe(401)
+
+    const wrongMethod = await call(subscribe, { method: 'GET', headers: AUTH })
+    expect(wrongMethod.statusCode).toBe(405)
+
+    const missingKeys = await call(subscribe, { headers: AUTH, body: { endpoint } })
+    expect(missingKeys.statusCode).toBe(400)
+
+    const insecureEndpoint = await call(subscribe, {
+      headers: AUTH,
+      body: { endpoint: 'http://x', keys: { p256dh: 'p1', auth: 'a1' } },
+    })
+    expect(insecureEndpoint.statusCode).toBe(400)
+
+    expect(db.subscriptions.size).toBe(0)
   })
 })
 
